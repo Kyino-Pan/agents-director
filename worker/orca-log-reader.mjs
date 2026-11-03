@@ -1,0 +1,503 @@
+import { DatabaseSync } from 'node:sqlite'
+import { readFile, stat, open } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join, isAbsolute } from 'node:path'
+import { WINDOW_MS, timestamp } from './activity-store.mjs'
+import { readProjectCatalog } from './project-catalog-reader.mjs'
+import { readOrchestration } from './orchestration-reader.mjs'
+import { SessionRouting } from './session-routing.mjs'
+
+const PAGE_SIZE = 2000
+const MAX_LOG_BYTES = 32 * 1024 * 1024
+
+export function defaultDataDirectory(platform = process.platform, home = homedir()) {
+  if (platform === 'darwin') {
+    return join(home, 'Library', 'Application Support', 'orca')
+  }
+  if (platform === 'win32') {
+    return join(process.env.APPDATA || join(home, 'AppData', 'Roaming'), 'orca')
+  }
+  return join(process.env.XDG_CONFIG_HOME || join(home, '.config'), 'orca')
+}
+
+const clean = (value) =>
+  typeof value === 'string' ? value.trim().slice(0, 2048) || undefined : undefined
+const parsed = (value) => {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
+export function importJournalRow(store, sessionId, row, now) {
+  if (!row || row.kind !== 'item' || !row.body) {
+    return
+  }
+  const id = store.agent(`session:${sessionId}`, { sessionId }, [`orca_session_id:${sessionId}`])
+  const body = row.body
+  const at = timestamp(row.ts)
+  if (at === null) {
+    return
+  }
+  const key = `journal:${sessionId}:${row.epoch}:${row.itemId}`
+  const turn = body.kind === 'turn' ? body : body.turnLifecycle
+  if (turn) {
+    const start = timestamp(turn.startedAt ?? turn.requestedAt)
+    const end = timestamp(turn.completedAt)
+    if (start !== null) {
+      store.point(`${key}:start`, id, start, 'working', 'journal', end ?? at)
+    }
+    if (end !== null) {
+      store.point(
+        `${key}:end`,
+        id,
+        end,
+        turn.state === 'unverifiable' ? 'unknown' : 'done',
+        'journal'
+      )
+    }
+  }
+  if (body.kind === 'approval' || body.kind === 'question') {
+    const state = body.resolution?.state
+    const resolvedAt = timestamp(body.resolution?.resolvedAt)
+    const pointId = `${key}:prompt`
+    if (!store.points.has(pointId)) {
+      store.point(pointId, id, at, 'waiting', 'journal', at)
+    } else {
+      store.points.get(pointId).until = resolvedAt ?? at
+    }
+    if (state && state !== 'pending') {
+      store.point(
+        `${key}:resolved`,
+        id,
+        resolvedAt ?? at,
+        state === 'resolved' ? 'working' : 'unknown',
+        'journal',
+        at
+      )
+    }
+  }
+  for (const block of body.blocks ?? []) {
+    if (block?.type === 'subagent' || block?.kind === 'subagent') {
+      importJournalChild(store, id, block, at, now)
+    }
+    for (const child of block?.agents ?? block?.children ?? []) {
+      importJournalChild(store, id, child, at, now)
+    }
+  }
+}
+
+function importJournalChild(store, parentId, child, at, now) {
+  const nativeId = clean(child.id ?? child.agentId)
+  if (!nativeId) {
+    return
+  }
+  const parent = store.agents.get(parentId)
+  const root = parentId
+  if (child.parentId) {
+    parentId = store.agent(`child:${root}:${child.parentId}`)
+  }
+  const name = clean(child.label) ?? clean(child.name)
+  const description = clean(child.description)
+  const id = store.agent(
+    `child:${root}:${nativeId}`,
+    {
+      label: name ?? description ?? clean(child.agentType) ?? nativeId,
+      labelSource: name ? 'name' : description ? 'task' : 'fallback',
+      providerSessionId: parent?.provider === 'codex' ? nativeId : undefined,
+      parentId,
+      provider: parent?.provider,
+      workspace: parent?.workspace,
+      spawnedAt: timestamp(child.startedAt) ?? at
+    },
+    parent?.provider === 'codex' ? [`native:codex:${nativeId}`] : []
+  )
+  const start = timestamp(child.startedAt) ?? at
+  const end = timestamp(child.settledAt ?? child.completedAt)
+  const state = ['working', 'blocked', 'waiting'].includes(child.state)
+    ? child.state
+    : child.state === 'running'
+      ? 'working'
+      : 'unknown'
+  const run = child.run ?? start
+  store.point(
+    `child:${id}:${run}:start`,
+    id,
+    start,
+    timestamp(child.startedAt) !== null ? 'working' : state,
+    'journal',
+    end ?? Math.min(at, now)
+  )
+  if (state !== 'working' && end === null && at > start) {
+    store.point(`child:${id}:${run}:state:${at}`, id, at, state, 'journal', at)
+  }
+  if (end !== null) {
+    store.point(`child:${id}:${run}:end`, id, end, 'done', 'journal')
+  }
+}
+
+export function importStatusRow(store, paneKey, row, now) {
+  const payload = row.payload ?? {}
+  const session = payload.providerSession ?? row.providerSession
+  const provider =
+    clean(session?.agent ?? row.agent ?? row.agentType ?? payload.agentType) ?? 'agent'
+  const native = clean(session?.id)
+  const task = payload.orchestration ?? row.orchestration
+  const taskName = clean(task?.displayName) ?? clean(task?.taskTitle)
+  const title = clean(payload.terminalTitle ?? row.terminalTitle)
+  const id = store.agent(
+    native ? `native:${provider}:${native}` : `pane:${paneKey}`,
+    {
+      label: taskName ?? title ?? `${provider} · ${native?.slice(0, 8) ?? paneKey.slice(-8)}`,
+      labelSource: taskName ? 'task' : title ? 'terminal' : 'fallback',
+      provider,
+      providerSessionId: native,
+      paneKey,
+      terminalHandle: clean(row.terminalHandle),
+      workspace: clean(row.worktreeId),
+      taskId: clean(task?.taskId),
+      dispatchId: clean(task?.dispatchId),
+      runId: clean(task?.orchestrationRunId)
+    },
+    task?.dispatchId ? [`dispatch:${task.dispatchId}`] : []
+  )
+  // A terminal may resume a different conversation; only provider/session ids are durable identity.
+  const prior = store.aliases.get(`pane:${paneKey}`)
+  if (native && prior === `pane:${paneKey}` && prior !== id) {
+    store.merge(prior, id)
+  }
+  store.aliases.set(`pane:${paneKey}`, id)
+  if (row.terminalHandle) {
+    store.aliases.set(row.terminalHandle, id)
+  }
+  const main = payload.mainAgent
+  const at = timestamp(main?.stateStartedAt ?? row.stateStartedAt ?? row.receivedAt)
+  const observed = timestamp(row.evidenceObservedAt ?? row.receivedAt) ?? at
+  if (at !== null) {
+    store.point(
+      `status:${id}:${at}`,
+      id,
+      at,
+      main?.state ?? payload.state,
+      'status-cache',
+      observed
+    )
+  }
+  for (const entry of row.stateHistory ?? payload.stateHistory ?? []) {
+    const start = timestamp(entry.mainAgent?.stateStartedAt ?? entry.startedAt)
+    if (start !== null) {
+      store.point(
+        `status:${id}:${start}`,
+        id,
+        start,
+        entry.mainAgent?.state ?? entry.state,
+        'status-cache',
+        timestamp(entry.observedAt) ?? observed
+      )
+    }
+  }
+  for (const child of payload.subagents ?? []) {
+    importJournalChild(store, id, child, observed ?? now, now)
+  }
+  const path = session?.transcriptPath
+  return !row.connectionId && typeof path === 'string' && isAbsolute(path)
+    ? { path, id, provider }
+    : null
+}
+
+export function importTranscriptRow(store, agentId, provider, row, fileKey) {
+  const at = timestamp(row?.timestamp ?? row?.ts)
+  const payload = row?.payload
+  if (at === null) {
+    return
+  }
+  if (provider === 'codex' && row.type === 'event_msg') {
+    const states = { task_started: 'working', task_complete: 'done', turn_aborted: 'done' }
+    if (states[payload?.type]) {
+      if (states[payload.type] === 'done') {
+        settleTranscriptWork(store, agentId, at)
+      }
+      store.point(
+        `${fileKey}:${at}:${payload.type}`,
+        agentId,
+        at,
+        states[payload.type],
+        'transcript',
+        states[payload.type] === 'working' ? at : undefined
+      )
+    }
+    if (payload?.type === 'sub_agent_activity' && payload.agent_thread_id) {
+      const childAt = timestamp(payload.occurred_at_ms) ?? at
+      const id = store.agent(`native:codex:${payload.agent_thread_id}`, {
+        label: clean(payload.agent_path),
+        labelSource: 'path',
+        provider: 'codex',
+        providerSessionId: clean(payload.agent_thread_id),
+        parentId: agentId,
+        spawnedAt: childAt
+      })
+      if (payload.kind === 'completed') {
+        settleTranscriptWork(store, id, childAt)
+      }
+      store.point(
+        `${fileKey}:${id}:${childAt}`,
+        id,
+        childAt,
+        payload.kind === 'started' ? 'working' : payload.kind === 'completed' ? 'done' : 'unknown',
+        'transcript',
+        payload.kind === 'started' ? childAt : undefined
+      )
+    }
+  }
+  if (provider === 'claude') {
+    const state =
+      row.type === 'user' && !row.isMeta && typeof row.message?.content === 'string'
+        ? 'working'
+        : row.type === 'assistant' && row.message?.stop_reason === 'end_turn'
+          ? 'done'
+          : null
+    if (state) {
+      if (state === 'done') {
+        settleTranscriptWork(store, agentId, at)
+      }
+      store.point(
+        `${fileKey}:${row.uuid ?? at}`,
+        agentId,
+        at,
+        state,
+        'transcript',
+        state === 'working' ? at : undefined
+      )
+    }
+  }
+}
+
+function settleTranscriptWork(store, agentId, at) {
+  let previous
+  const canonical = store.aliases.get(agentId) ?? agentId
+  for (const point of store.points.values()) {
+    if (
+      point.agentId === canonical &&
+      point.source === 'transcript' &&
+      point.at < at &&
+      (!previous || point.at > previous.at)
+    ) {
+      previous = point
+    }
+  }
+  if (previous?.state === 'working') {
+    previous.until = at
+  }
+}
+
+export class OrcaLogReader {
+  databases = new Map()
+  databaseFiles = new Map()
+  journalCursors = new Map()
+  transcripts = new Map()
+  warned = new Set()
+
+  constructor(store, directories) {
+    this.store = store
+    this.directories = directories
+  }
+
+  database(path) {
+    let db = this.databases.get(path)
+    if (!db) {
+      db = new DatabaseSync(path, { readOnly: true, timeout: 250 })
+      db.exec('PRAGMA query_only = ON')
+      this.databases.set(path, db)
+    }
+    return db
+  }
+
+  async scan(now = Date.now()) {
+    this.store.projectCatalog.clear()
+    const catalogs = new Map()
+    for (const directory of this.directories) {
+      const tabWorkspaces = await readProjectCatalog(this, directory)
+      await this.scanSource(join(directory, 'agent-session-journal.db'), () =>
+        this.journal(directory, now)
+      )
+      catalogs.set(directory, tabWorkspaces)
+      const statusPath = join(directory, 'agent-hooks', 'last-status.json')
+      await this.scanSource(statusPath, async () => {
+        const contents = await readFile(statusPath, 'utf8')
+        if (contents.length > MAX_LOG_BYTES) {
+          throw new Error('Status cache exceeds the 32 MiB reader limit')
+        }
+        const status = JSON.parse(contents)
+        for (const [pane, row] of Object.entries(status.entries ?? {})) {
+          const transcript = importStatusRow(this.store, pane, row, now)
+          if (transcript) {
+            this.transcripts.set(transcript.path, {
+              ...this.transcripts.get(transcript.path),
+              ...transcript
+            })
+          }
+        }
+        return `${Object.keys(status.entries ?? {}).length} cached panes; cache alone does not prove live activity`
+      })
+    }
+    for (const transcript of this.transcripts.values()) {
+      await this.scanSource(transcript.path, () => this.transcript(transcript, now))
+    }
+    new SessionRouting(this.store).repairLivePoints()
+    for (const [directory, catalog] of catalogs) {
+      await this.scanSource(join(directory, 'orchestration.db'), () =>
+        readOrchestration(this, directory, now, catalog)
+      )
+    }
+  }
+
+  async scanSource(path, scan) {
+    try {
+      const info = await stat(path)
+      if (path.endsWith('.db')) {
+        const fingerprint = `${info.dev}:${info.ino}`
+        const previous = this.databaseFiles.get(path)
+        if (previous && previous !== fingerprint) {
+          this.databases.get(path)?.close()
+          this.databases.delete(path)
+          this.journalCursors.delete(path)
+        }
+        this.databaseFiles.set(path, fingerprint)
+      }
+      const detail = await scan()
+      this.store.source(path, 'ok', detail)
+    } catch (error) {
+      this.store.source(
+        path,
+        error.code === 'ENOENT' ? 'missing' : 'error',
+        error.code === 'ENOENT'
+          ? 'Not present on this collector host'
+          : String(error.message).slice(0, 300)
+      )
+      const db = this.databases.get(path)
+      if (db) {
+        db.close()
+        this.databases.delete(path)
+        this.journalCursors.delete(path)
+      }
+    }
+  }
+
+  journal(directory, now) {
+    const path = join(directory, 'agent-session-journal.db')
+    const db = this.database(path)
+    const records = db.prepare('SELECT session_id, record_json FROM agent_session_records').all()
+    for (const record of records) {
+      const value = parsed(record.record_json)
+      if (!value) {
+        continue
+      }
+      const aliases = [`orca_session_id:${record.session_id}`]
+      for (const link of value.providerHandleChain ?? []) {
+        if (link.handle?.nativeId) {
+          aliases.push(`native:${link.handle.agent ?? value.provider}:${link.handle.nativeId}`)
+        }
+      }
+      this.store.agent(
+        `session:${record.session_id}`,
+        {
+          label:
+            clean(value.conversationName) ??
+            `${value.provider ?? 'agent'} · ${record.session_id.slice(0, 8)}`,
+          labelSource: clean(value.conversationName)
+            ? value.conversationNameSource === 'user'
+              ? 'user'
+              : 'conversation'
+            : 'fallback',
+          sessionId: record.session_id,
+          providerSessionId: clean(value.providerHandleChain?.at(-1)?.handle?.nativeId),
+          provider: clean(value.provider),
+          workspace: clean(value.location?.workspaceId)
+        },
+        aliases
+      )
+    }
+    const tip = db.prepare('SELECT COALESCE(MAX(rowid), 0) AS last FROM journal_rows').get().last
+    let before = this.journalCursors.get(path) ?? 0
+    if (before > tip) {
+      before = 0
+    }
+    const rows = db
+      .prepare(`SELECT rowid, session_id, row_json FROM journal_rows
+      WHERE rowid > ? AND (ts >= ? OR row_json LIKE '%"running"%') ORDER BY rowid LIMIT ?`)
+      .all(before, now - WINDOW_MS, PAGE_SIZE)
+    for (const row of rows) {
+      importJournalRow(this.store, row.session_id, parsed(row.row_json), now)
+    }
+    const last = rows.at(-1)?.rowid ?? before
+    this.journalCursors.set(path, rows.length === PAGE_SIZE ? last : tip)
+    if (rows.length === PAGE_SIZE) {
+      this.store.limited = true
+    }
+    return `${rows.length} journal rows read this pass${rows.length === PAGE_SIZE ? '; catching up in batches' : ''}`
+  }
+
+  async transcript(entry, now) {
+    const info = await stat(entry.path)
+    if (info.mtimeMs < now - WINDOW_MS) {
+      return `${entry.provider} transcript last modified before the 7-day window`
+    }
+    if (entry.ino !== info.ino || (entry.offset ?? 0) > info.size) {
+      entry.offset = 0
+      entry.tail = Buffer.alloc(0)
+    }
+    const from = entry.offset ?? 0
+    const start = Math.max(from, info.size - MAX_LOG_BYTES)
+    const file = await open(entry.path, 'r')
+    let bytes
+    try {
+      bytes = Buffer.alloc(Math.min(MAX_LOG_BYTES, info.size - start))
+      const result = await file.read(bytes, 0, bytes.length, start)
+      bytes = bytes.subarray(0, result.bytesRead)
+    } finally {
+      await file.close()
+    }
+    let contents = Buffer.concat([
+      start === from ? (entry.tail ?? Buffer.alloc(0)) : Buffer.alloc(0),
+      bytes
+    ])
+    if (start > from) {
+      contents = contents.subarray(contents.indexOf(10) + 1)
+      this.store.limited = true
+    }
+    const end = contents.lastIndexOf(10)
+    const lines =
+      end !== -1
+        ? contents
+            .subarray(0, end + 1)
+            .toString('utf8')
+            .split('\n')
+        : []
+    entry.tail = contents.subarray(end + 1)
+    if (entry.tail.length > 1024 * 1024) {
+      entry.tail = Buffer.alloc(0)
+      this.store.limited = true
+    }
+    for (const line of lines) {
+      const row = parsed(line)
+      if (!row) {
+        continue
+      }
+      const at = timestamp(row.timestamp ?? row.ts)
+      if (at !== null && at >= now - WINDOW_MS) {
+        importTranscriptRow(this.store, entry.id, entry.provider, row, entry.path)
+      }
+    }
+    entry.offset = start + bytes.length
+    entry.ino = info.ino
+    return `${entry.provider} transcript; ${bytes.length} new bytes read`
+  }
+
+  close() {
+    for (const db of this.databases.values()) {
+      db.close()
+    }
+    this.databases.clear()
+  }
+}

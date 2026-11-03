@@ -1,0 +1,23 @@
+{
+  "name": "orca-agent-activity",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "node build-navigation.mjs",
+    "test": "node --test --test-concurrency=2 *.test.mjs worker/*.test.mjs",
+    "lint": "oxlint --deny-warnings *.mjs worker/*.mjs",
+    "format:check": "oxfmt --check *.mjs worker/*.mjs *.json *.md *.html *.css assets/preview-theme.css",
+    "preview": "node preview.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "oxfmt": "0.74.0",
+    "oxlint": "1.89.0",
+    "playwright": "1.58.2"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

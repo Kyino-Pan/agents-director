@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Activity</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <main class="activity">
+      <header class="header">
+        <div class="heading">
+          <h1>Agent Activity</h1>
+          <span id="live-status" class="live">Connecting</span>
+        </div>
+        <div class="toolbar">
+          <label class="search"
+            ><span class="sr-only">Find an agent, ID or workspace</span
+            ><input
+              id="search"
+              type="search"
+              placeholder="Find name, ID or workspace…"
+              autocomplete="off"
+          /></label>
+          <button type="button" id="shorten-links" aria-pressed="false">Shorter links</button>
+          <button type="button" id="pause" aria-pressed="false">Pause view</button>
+        </div>
+        <div class="time-controls">
+          <label for="zoom">Window</label>
+          <span id="zoom-min" class="zoom-bound">5m</span>
+          <input
+            id="zoom"
+            type="range"
+            min="0"
+            max="11"
+            value="7"
+            step="1"
+            aria-valuetext="24 hours"
+          />
+          <span id="zoom-limit" class="zoom-bound">7d</span>
+          <output id="zoom-value" for="zoom">24h</output>
+        </div>
+        <div class="range-controls">
+          <label>From <input id="range-start" type="datetime-local" /></label
+          ><label>To <input id="range-end" type="datetime-local" /></label>
+        </div>
+        <div class="overview">
+          <span id="summary">Loading activity…</span><span id="period" class="mono"></span>
+        </div>
+      </header>
+      <div id="notice" class="notice" role="status" hidden></div>
+      <div id="navigation-status" class="notice" role="status" hidden></div>
+      <div id="failure" class="failure" role="alert" hidden>
+        <span id="failure-text"></span><button type="button" id="retry">Retry</button>
+      </div>
+      <section class="timeline" aria-label="Agent timeline">
+        <div class="legend" aria-label="Timeline legend">
+          <span><i class="swatch working"></i>Working</span
+          ><span><i class="swatch blocked"></i>Blocked</span
+          ><span><i class="swatch waiting"></i>Waiting</span
+          ><span><i class="swatch done"></i>Done</span
+          ><span><i class="swatch unknown"></i>Unobserved</span>
+          <span class="connector-legend">└ Spawn</span
+          ><span class="connector-legend">↗ Message</span>
+        </div>
+        <div id="empty" class="empty" role="status">
+          <strong>Loading agent activity</strong>
+          <p>Reading observed history.</p>
+        </div>
+        <div id="chart-scroll" class="chart-scroll scrollbar-editor" hidden>
+          <div class="chart-grid">
+            <div class="labels">
+              <div class="label-heading">PROJECT / AGENT</div>
+              <div id="lanes"></div>
+            </div>
+            <div id="plot" class="plot">
+              <div id="axis" class="axis"></div>
+              <div id="view-empty" class="view-empty" role="status" hidden>
+                <strong>No activity in this view</strong>
+                <p>Scroll back or choose another time window or search term.</p>
+              </div>
+              <svg
+                id="chart"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-label="Activity segments, spawn connections and coordination messages"
+              ></svg>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section
+        id="detail"
+        class="detail"
+        popover="manual"
+        role="dialog"
+        aria-labelledby="detail-heading"
+        hidden
+      >
+        <div class="detail-header">
+          <h2 id="detail-heading" tabindex="-1"></h2>
+          <button type="button" id="close-detail" class="quiet">Close</button>
+        </div>
+        <div id="detail-meta" class="detail-meta"></div>
+        <p id="detail-body"></p>
+        <div id="related-messages" class="related-messages" hidden></div>
+        <details id="identity" class="identity">
+          <summary>Agent identity</summary>
+          <div id="identity-list"></div>
+        </details>
+        <div id="copy-status" role="status"></div>
+      </section>
+      <dialog id="sources-dialog" class="sources" aria-labelledby="source-summary">
+        <div class="detail-header">
+          <h2 id="source-summary">Data sources</h2>
+          <button id="close-sources" type="button" class="quiet">Close</button>
+        </div>
+        <div id="source-list"></div>
+        <p id="collection-note"></p>
+      </dialog>
+      <div id="activity-menu" popover="manual" role="menu" aria-label="Activity actions">
+        <button id="navigate-terminal" type="button" role="menuitem">Go to terminal</button>
+        <button id="show-sources" type="button" role="menuitem">Data sources</button>
+      </div>
+    </main>
+    <script type="module" src="panel.mjs"></script>
+  </body>
+</html>

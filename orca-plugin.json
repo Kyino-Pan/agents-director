@@ -1,0 +1,92 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stablyai/orca/main/docs/schemas/plugins/orca-plugin.v2.schema.json",
+  "manifestVersion": 2,
+  "execution": "trusted-worker",
+  "id": "agent-activity",
+  "name": "Agent Activity",
+  "version": "0.1.0",
+  "description": "A rolling 7-day agent timeline reconstructed from Orca logs, with live status updates and orchestration message arrows.",
+  "engines": {
+    "orca": ">=1.4.246"
+  },
+  "pluginApi": 1,
+  "main": "worker/main.mjs",
+  "contributes": {
+    "panels": [
+      {
+        "id": "activity",
+        "title": "Agent Activity",
+        "icon": "activity",
+        "entry": "panel.html"
+      }
+    ],
+    "customEditors": [
+      {
+        "id": "overview",
+        "title": "Agent Activity",
+        "extensions": [".orca-activity"],
+        "entry": "panel.html",
+        "priority": "default"
+      }
+    ],
+    "newFiles": [
+      {
+        "id": "overview",
+        "title": "Agent Activity",
+        "extension": ".orca-activity",
+        "template": "overview.orca-activity"
+      }
+    ],
+    "commands": [
+      {
+        "id": "refresh",
+        "title": "Agent Activity: Refresh logs"
+      }
+    ],
+    "events": [
+      {
+        "on": "agent.status.changed"
+      }
+    ],
+    "settings": [
+      {
+        "key": "dataDirectories",
+        "title": "Orca data directories",
+        "type": "string",
+        "multiline": true,
+        "description": "One absolute path per line. Leave empty for this computer's default Orca profile. Add profile directories or read-only mounted copies from another host to import their logs.",
+        "default": ""
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "kind": "agent:read"
+    },
+    {
+      "kind": "storage:own"
+    },
+    {
+      "kind": "settings:own"
+    }
+  ],
+  "repository": "https://github.com/Kyino-Pan/orca-agent-activity",
+  "homepage": "https://github.com/Kyino-Pan/orca-agent-activity",
+  "license": "MIT",
+  "author": {
+    "name": "Kyino-Pan",
+    "url": "https://github.com/Kyino-Pan"
+  },
+  "screenshots": [
+    {
+      "path": "assets/light.png",
+      "alt": "Light timeline with synthetic agent states, spawn branches and message arrows",
+      "theme": "light"
+    },
+    {
+      "path": "assets/dark.png",
+      "alt": "Dark timeline with synthetic agent states, spawn branches and message arrows",
+      "theme": "dark"
+    }
+  ]
+}
