@@ -6,6 +6,7 @@ import { WINDOW_MS, timestamp } from './activity-store.mjs'
 import { readProjectCatalog } from './project-catalog-reader.mjs'
 import { readOrchestration } from './orchestration-reader.mjs'
 import { bindStructuredPane, SessionRouting } from './session-routing.mjs'
+import { JournalOutcomeReader } from './journal-outcome-reader.mjs'
 
 const PAGE_SIZE = 2000
 const MAX_LOG_BYTES = 32 * 1024 * 1024
@@ -72,7 +73,7 @@ export function importJournalRow(store, sessionId, row, now) {
     const resolvedAt = timestamp(body.resolution?.resolvedAt)
     const pointId = `${key}:prompt`
     if (!store.points.has(pointId)) {
-      store.point(pointId, id, at, 'waiting', 'journal', at)
+      store.point(pointId, id, at, 'waiting', 'journal', resolvedAt ?? at)
     } else {
       store.points.get(pointId).until = resolvedAt ?? at
     }
@@ -89,15 +90,15 @@ export function importJournalRow(store, sessionId, row, now) {
   }
   for (const block of body.blocks ?? []) {
     if (block?.type === 'subagent' || block?.kind === 'subagent') {
-      importJournalChild(store, id, block, at, now)
+      importJournalChild(store, id, block, at, now, key)
     }
     for (const child of block?.agents ?? block?.children ?? []) {
-      importJournalChild(store, id, child, at, now)
+      importJournalChild(store, id, child, at, now, key)
     }
   }
 }
 
-function importJournalChild(store, parentId, child, at, now) {
+function importJournalChild(store, parentId, child, at, now, journalKey) {
   const nativeId = clean(child.id ?? child.agentId)
   if (!nativeId) {
     return
@@ -130,8 +131,9 @@ function importJournalChild(store, parentId, child, at, now) {
       ? 'working'
       : 'unknown'
   const run = child.run ?? start
+  const key = `${journalKey ? `${journalKey}:` : ''}child:${id}:${run}`
   store.point(
-    `child:${id}:${run}:start`,
+    `${key}:start`,
     id,
     start,
     timestamp(child.startedAt) !== null ? 'working' : state,
@@ -139,10 +141,10 @@ function importJournalChild(store, parentId, child, at, now) {
     end ?? Math.min(at, now)
   )
   if (state !== 'working' && end === null && at > start) {
-    store.point(`child:${id}:${run}:state:${at}`, id, at, state, 'journal', at)
+    store.point(`${key}:state:${at}`, id, at, state, 'journal', at)
   }
   if (end !== null) {
-    store.point(`child:${id}:${run}:end`, id, end, 'done', 'journal')
+    store.point(`${key}:end`, id, end, 'done', 'journal')
   }
 }
 
@@ -304,6 +306,8 @@ export class OrcaLogReader {
   databases = new Map()
   databaseFiles = new Map()
   journalCursors = new Map()
+  journalOutcomes = new Map()
+  journalWarnings = new Map()
   transcripts = new Map()
   warned = new Set()
 
@@ -374,11 +378,13 @@ export class OrcaLogReader {
           this.databases.get(path)?.close()
           this.databases.delete(path)
           this.journalCursors.delete(path)
+          this.journalOutcomes.delete(path)
+          this.journalWarnings.delete(path)
         }
         this.databaseFiles.set(path, fingerprint)
       }
       const detail = await scan()
-      this.store.source(path, 'ok', detail)
+      this.store.source(path, detail?.limited ? 'limited' : 'ok', detail?.detail ?? detail)
     } catch (error) {
       this.store.source(
         path,
@@ -392,6 +398,7 @@ export class OrcaLogReader {
         db.close()
         this.databases.delete(path)
         this.journalCursors.delete(path)
+        this.journalOutcomes.delete(path)
       }
     }
   }
@@ -399,6 +406,15 @@ export class OrcaLogReader {
   journal(directory, now) {
     const path = join(directory, 'agent-session-journal.db')
     const db = this.database(path)
+    db.exec('BEGIN')
+    try {
+      return this.journalSnapshot(db, path, now)
+    } finally {
+      db.exec('ROLLBACK')
+    }
+  }
+
+  journalSnapshot(db, path, now) {
     const records = db.prepare('SELECT session_id, record_json FROM agent_session_records').all()
     for (const record of records) {
       const value = parsed(record.record_json)
@@ -431,6 +447,21 @@ export class OrcaLogReader {
         aliases
       )
     }
+    let outcomes = this.journalOutcomes.get(path)
+    if (!outcomes) {
+      outcomes = new JournalOutcomeReader()
+      this.journalOutcomes.set(path, outcomes)
+    }
+    const coverage = outcomes.read(db, (sessionId, items) => {
+      const prefix = `journal:${sessionId}:`
+      for (const [id] of this.store.points) {
+        if (id.startsWith(prefix)) this.store.points.delete(id)
+      }
+      for (const item of items) importJournalRow(this.store, sessionId, item, now)
+    })
+    const warnings = this.journalWarnings.get(path) ?? new Set()
+    this.journalWarnings.set(path, warnings)
+    for (const sessionId of coverage.sessions) warnings.delete(sessionId)
     const tip = db.prepare('SELECT COALESCE(MAX(rowid), 0) AS last FROM journal_rows').get().last
     let before = this.journalCursors.get(path) ?? 0
     if (before > tip) {
@@ -441,14 +472,23 @@ export class OrcaLogReader {
       WHERE rowid > ? AND (ts >= ? OR row_json LIKE '%"running"%') ORDER BY rowid LIMIT ?`)
       .all(before, now - WINDOW_MS, PAGE_SIZE)
     for (const row of rows) {
-      importJournalRow(this.store, row.session_id, parsed(row.row_json), now)
+      if (coverage.sessions.has(row.session_id)) continue
+      const value = parsed(row.row_json)
+      if (value?.kind === 'outcomes' || value?.v > 4) {
+        warnings.add(row.session_id)
+      } else {
+        importJournalRow(this.store, row.session_id, value, now)
+      }
     }
     const last = rows.at(-1)?.rowid ?? before
     this.journalCursors.set(path, rows.length === PAGE_SIZE ? last : tip)
     if (rows.length === PAGE_SIZE) {
       this.store.limited = true
     }
-    return `${rows.length} journal rows read this pass${rows.length === PAGE_SIZE ? '; catching up in batches' : ''}`
+    return {
+      limited: coverage.limited || warnings.size > 0 || rows.length === PAGE_SIZE,
+      detail: `${rows.length} journal rows read this pass; ${coverage.detail}${warnings.size ? '; Unsupported journal history or missing outcome source' : ''}${rows.length === PAGE_SIZE ? '; catching up in batches' : ''}`
+    }
   }
 
   async transcript(entry, now) {

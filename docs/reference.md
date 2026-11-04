@@ -85,7 +85,11 @@ cache. The preview uses the included Orca theme variables. Stop with Ctrl-C. Opt
 The trusted worker reads, without modifying source databases:
 
 - `agent-session-journal.db`: saved turn endpoints, question/approval observations, and recorded
-  child-agent lifecycle blocks. Provider-neutral journal records cover native Chat sessions.
+  child-agent lifecycle blocks. Native Chat history supports legacy inline rows and v5 outcome
+  markers with outcome formats 1 and 2. The reader uses the active epoch/generation, applies the
+  latest published item values and deletions over any inline prefix, and skips unchanged outcome
+  data. Unsupported formats appear as limited source coverage. Open turns stop at their saved
+  observation time; they do not prove continuous work up to the present.
 - `agent-hooks/last-status.json`: pane/session correlation and recent state observations. This is
   a cache, not a full historical log. Its provider transcript paths select local Codex/Claude
   JSONL files for incremental parsing; the plugin never scans unrelated home-directory sessions.

@@ -59,7 +59,7 @@ export default async function activate(orca) {
         ...(event.title ? { label: event.title, labelSource: 'terminal' } : {}),
         paneKey: event.paneKey,
         terminalHandle: event.terminalId,
-        workspace: event.workspaceId
+        workspace: event.workspaceId ?? event.worktreeId
       },
       event.terminalId ? [event.terminalId] : []
     )
