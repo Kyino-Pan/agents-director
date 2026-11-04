@@ -35,6 +35,11 @@ export async function startPreview({ directories = [defaultDataDirectory()], por
     'panel.css': ['panel.css', 'text/css; charset=utf-8'],
     'panel.mjs': ['panel.mjs', 'text/javascript; charset=utf-8'],
     'panel-identity.mjs': ['panel-identity.mjs', 'text/javascript; charset=utf-8'],
+    'panel-harness.mjs': ['panel-harness.mjs', 'text/javascript; charset=utf-8'],
+    'assets/orca-harness-icons.mjs': [
+      'assets/orca-harness-icons.mjs',
+      'text/javascript; charset=utf-8'
+    ],
     'panel-actions.mjs': ['panel-actions.mjs', 'text/javascript; charset=utf-8'],
     'lane-order.mjs': ['lane-order.mjs', 'text/javascript'],
     'lane-motion.mjs': ['lane-motion.mjs', 'text/javascript'],

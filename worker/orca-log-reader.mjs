@@ -5,7 +5,7 @@ import { join, isAbsolute } from 'node:path'
 import { WINDOW_MS, timestamp } from './activity-store.mjs'
 import { readProjectCatalog } from './project-catalog-reader.mjs'
 import { readOrchestration } from './orchestration-reader.mjs'
-import { SessionRouting } from './session-routing.mjs'
+import { bindStructuredPane, SessionRouting } from './session-routing.mjs'
 
 const PAGE_SIZE = 2000
 const MAX_LOG_BYTES = 32 * 1024 * 1024
@@ -28,6 +28,15 @@ const parsed = (value) => {
   } catch {
     return null
   }
+}
+
+function providerHandle(handle) {
+  const provider = clean(handle?.agent ?? handle?.provider)
+  const id = clean(
+    handle?.nativeId ??
+      (provider === 'codex' ? handle?.threadId : provider === 'claude' ? handle?.sessionId : null)
+  )
+  return { provider, id }
 }
 
 export function importJournalRow(store, sessionId, row, now) {
@@ -344,6 +353,9 @@ export class OrcaLogReader {
     for (const transcript of this.transcripts.values()) {
       await this.scanSource(transcript.path, () => this.transcript(transcript, now))
     }
+    for (const agent of this.store.agents.values()) {
+      bindStructuredPane(this.store, agent.paneKey)
+    }
     new SessionRouting(this.store).repairLivePoints()
     for (const [directory, catalog] of catalogs) {
       await this.scanSource(join(directory, 'orchestration.db'), () =>
@@ -395,8 +407,9 @@ export class OrcaLogReader {
       }
       const aliases = [`orca_session_id:${record.session_id}`]
       for (const link of value.providerHandleChain ?? []) {
-        if (link.handle?.nativeId) {
-          aliases.push(`native:${link.handle.agent ?? value.provider}:${link.handle.nativeId}`)
+        const handle = providerHandle(link.handle)
+        if (handle.id) {
+          aliases.push(`native:${handle.provider ?? value.provider}:${handle.id}`)
         }
       }
       this.store.agent(
@@ -411,7 +424,7 @@ export class OrcaLogReader {
               : 'conversation'
             : 'fallback',
           sessionId: record.session_id,
-          providerSessionId: clean(value.providerHandleChain?.at(-1)?.handle?.nativeId),
+          providerSessionId: providerHandle(value.providerHandleChain?.at(-1)?.handle).id,
           provider: clean(value.provider),
           workspace: clean(value.location?.workspaceId)
         },

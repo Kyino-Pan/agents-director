@@ -13,3 +13,16 @@ The vendored process launcher in `vendor/process-host/` and preview theme variab
 
 `dist/terminal-cli.mjs` is an unminified bundle produced by `npm run build`. The complete
 source used by that build is included in this repository. No runtime download is required.
+
+Harness artwork and English labels in `assets/orca-harness-icons.mjs` are generated
+from Orca commit `647207aae1cc2652bccd3c87352e19c36c69a0b9`, using:
+
+- `src/renderer/src/lib/agent-catalog.tsx` and its catalog/glyph/favicon dependencies
+- `src/renderer/src/components/status-bar/icons.tsx`
+- `src/shared/agent-type-icon-agent.ts`, `src/shared/agent-type-label.ts`, and `src/shared/agent-icons/`
+- `resources/openclaude-logo.png`
+
+The generator renders Orca's own `AgentIcon` for every supported harness and embeds
+its image assets for offline use. Agent names and logos belong to their respective
+owners. Regenerate with `node scripts/sync-orca-harness-icons.mjs <Orca checkout>`;
+React is used only by this development tool, not by the plugin at runtime.

@@ -286,8 +286,22 @@ input::placeholder {
 .lane:focus-visible {
   outline-offset: -3px;
 }
+.lane-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.harness-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+}
 .lane-name {
   display: block;
+  min-width: 0;
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -310,13 +324,13 @@ input::placeholder {
   color: var(--orca-muted-foreground);
   font-size: 11px;
 }
-.lane-workspace {
+.lane-identity {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-mono);
 }
-.lane-workspace::before {
+.lane-identity::before {
   content: '·';
   margin-right: 8px;
 }

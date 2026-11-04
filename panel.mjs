@@ -1,4 +1,5 @@
 import { agentName, renderActivityDetail, visibleAgents } from './panel-identity.mjs'
+import { harnessIcon, harnessLabel, shortAgentId } from './panel-harness.mjs'
 import { installActivityActions, renderSources } from './panel-actions.mjs'
 import { createLaneMotion, spawnPath, messagePath } from './lane-motion.mjs'
 import { loadViewPreferences } from './view-preferences.mjs'
@@ -206,14 +207,14 @@ function render() {
     const last = agent.segments.findLast((segment) => segment.start <= end)
     const state = stateOf(last)
     const label = agentName(agent)
-    lane.setAttribute('aria-label', `${label}: ${stateLabel(state)}. Inspect agent`)
+    const identity = `${harnessLabel(agent)} · ${shortAgentId(agent)}`
+    lane.setAttribute('aria-label', `${label}: ${stateLabel(state)}. ${identity}. Inspect agent`)
     const status = node('span', `lane-state ${state}`, stateLabel(state))
     const meta = node('span', 'lane-meta')
-    meta.append(
-      status,
-      node('span', 'lane-workspace', agent.workspace || agent.provider || 'Workspace unavailable')
-    )
-    lane.append(node('span', 'lane-name', label), meta)
+    meta.append(status, node('span', 'lane-identity', shortAgentId(agent)))
+    const heading = node('span', 'lane-heading')
+    heading.append(harnessIcon(agent), node('span', 'lane-name', label))
+    lane.append(heading, meta)
     labels.push(lane)
   }
   $('lanes').replaceChildren(...labels)

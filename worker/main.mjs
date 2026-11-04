@@ -1,6 +1,7 @@
 import { ActivityStore } from './activity-store.mjs'
 import { OrcaLogReader, defaultDataDirectory } from './orca-log-reader.mjs'
 import { createTerminalNavigator } from './terminal-navigation.mjs'
+import { bindStructuredPane } from './session-routing.mjs'
 
 const STORAGE_PREFIX = 'activity-v1'
 let stop
@@ -53,7 +54,7 @@ export default async function activate(orca) {
     }
     const at = Number.isFinite(event.receivedAt) ? event.receivedAt : Date.now()
     const id = store.agent(
-      `pane:${event.paneKey}`,
+      bindStructuredPane(store, event.paneKey) ?? `pane:${event.paneKey}`,
       {
         ...(event.title ? { label: event.title, labelSource: 'terminal' } : {}),
         paneKey: event.paneKey,

@@ -295,7 +295,7 @@ test('old payloads and duplicate names retain separate stable identities across 
   const { page, errors } = await pageFor({ data })
   assert.deepEqual(await page.locator('.lane-name').allTextContents(), [
     'Same name',
-    'Unnamed agent',
+    'Agent session',
     'Same name'
   ])
   await page.locator(`.lane[data-agent="${data.agents[1].id}"]`).click()
@@ -309,7 +309,7 @@ test('old payloads and duplicate names retain separate stable identities across 
   await page.keyboard.press('Escape')
   await page.getByRole('searchbox').fill(data.agents[2].id)
   await page.locator('.lane').click()
-  assert.equal(await page.locator('#detail-heading').textContent(), 'Unnamed agent')
+  assert.equal(await page.locator('#detail-heading').textContent(), 'Agent session')
   assert.equal(await page.locator('[data-identity-id]').textContent(), data.agents[2].id)
   assert.deepEqual(errors, [])
   await page.close()

@@ -1,9 +1,11 @@
 import { orderProjectLanes } from './lane-order.mjs'
+import { harnessLabel } from './panel-harness.mjs'
 
 const $ = (id) => document.getElementById(id)
 
 export const IDENTITY_FIELDS = [
   ['id', 'Agent ID'],
+  ['provider', 'Harness'],
   ['sessionId', 'Session ID'],
   ['providerSessionId', 'Provider session'],
   ['paneKey', 'Pane key'],
@@ -15,7 +17,9 @@ export const IDENTITY_FIELDS = [
 ]
 
 export function agentName(agent) {
-  return agent?.label?.trim() && agent.label !== agent.id ? agent.label : 'Unnamed agent'
+  return agent?.label?.trim() && agent.label !== agent.id
+    ? agent.label
+    : `${agent?.provider ? harnessLabel(agent) : 'Agent'} session`
 }
 
 export function renderIdentity(agents, node) {

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ActivityStore } from './activity-store.mjs'
 import { OrcaLogReader, importStatusRow } from './orca-log-reader.mjs'
-import { SessionRouting } from './session-routing.mjs'
+import { bindStructuredPane, SessionRouting } from './session-routing.mjs'
 
 const NOW = Date.parse('2026-11-03T08:00:00Z')
 const iso = (offset) => new Date(NOW + offset).toISOString()
@@ -229,4 +229,73 @@ test('routing honors durable sessions, keeps unknown history unresolved and can 
   assert.notEqual(unknown, old)
   assert.notEqual(unknown, successor)
   assert.equal(store.aliases.get('pane:pane'), old)
+})
+
+test('native Chat live panes recover saved names and persisted harness identities after cache restore', async (context) => {
+  const { directory } = await fixture(context)
+  const journal = new DatabaseSync(join(directory, 'agent-session-journal.db'))
+  context.after(() => journal.close())
+  journal.exec(`CREATE TABLE agent_session_records (session_id TEXT, record_json TEXT);
+    CREATE TABLE journal_rows (session_id TEXT, ts INTEGER, row_json TEXT);`)
+  const store = new ActivityStore(NOW)
+  const cases = [
+    ['codex_chat', 'codex', { provider: 'codex', threadId: 'codex-thread' }],
+    ['claude_chat', 'claude', { provider: 'claude', sessionId: 'claude-session', leafUuid: null }],
+    ['grok_chat', 'grok', { transport: 'acp', agent: 'grok', nativeId: 'grok-session' }]
+  ]
+  for (const [sessionId, provider, handle] of cases) {
+    const nativeId = handle.threadId ?? handle.sessionId ?? handle.nativeId
+    const paneKey = `structured-agent-session-${sessionId}:leaf`
+    const pane = store.agent(`pane:${paneKey}`, { paneKey, workspace: 'folder:shared' })
+    store.point(`live:${sessionId}`, pane, NOW - 10000, 'working', 'live', NOW)
+    store.agent(`native:${provider}:${nativeId}`, { provider, providerSessionId: nativeId })
+    store.point(
+      `history:${sessionId}`,
+      `native:${provider}:${nativeId}`,
+      NOW - 20000,
+      'done',
+      'journal'
+    )
+    store.message({ id: `message:${sessionId}`, from: pane, to: pane, at: NOW - 5000 })
+    journal.prepare('INSERT INTO agent_session_records VALUES (?, ?)').run(
+      sessionId,
+      JSON.stringify({
+        provider,
+        conversationName: `Named ${provider}`,
+        conversationNameSource: 'user',
+        location: { workspaceId: 'folder:shared' },
+        providerHandleChain: [{ handle }]
+      })
+    )
+  }
+  const restored = new ActivityStore(NOW)
+  restored.restore(store.serialize(), NOW)
+  const reader = new OrcaLogReader(restored, [directory])
+  context.after(() => reader.close())
+  await reader.scan(NOW)
+  await reader.scan(NOW)
+  const snapshot = restored.snapshot(NOW)
+  assert.equal(snapshot.agents.length, 3)
+  for (const [sessionId, provider, handle] of cases) {
+    const agent = snapshot.agents.find((item) => item.sessionId === sessionId)
+    assert.equal(agent.label, `Named ${provider}`)
+    assert.equal(agent.provider, provider)
+    assert.equal(agent.providerSessionId, handle.threadId ?? handle.sessionId ?? handle.nativeId)
+    assert.equal(restored.points.get(`live:${sessionId}`).agentId, agent.id)
+    assert.equal(restored.points.get(`history:${sessionId}`).agentId, agent.id)
+    assert.equal(restored.messages.get(`message:${sessionId}`).from, agent.id)
+    assert.equal(bindStructuredPane(restored, agent.paneKey), agent.id)
+  }
+})
+
+test('new Chat events bind exact sessions without merging unrelated chats or terminal panes', () => {
+  const store = new ActivityStore(NOW)
+  const first = bindStructuredPane(store, 'structured-agent-session-codex_first:leaf')
+  const second = bindStructuredPane(store, 'structured-agent-session-codex_second:leaf')
+  assert.notEqual(first, second)
+  assert.equal(store.agents.get(first).sessionId, 'codex_first')
+  assert.equal(bindStructuredPane(store, 'structured-agent-session-codex_first:other-leaf'), first)
+  assert.equal(bindStructuredPane(store, 'terminal-tab:leaf'), undefined)
+  assert.equal(bindStructuredPane(store, 'structured-agent-session-:leaf'), undefined)
+  assert.equal(bindStructuredPane(store, undefined), undefined)
 })

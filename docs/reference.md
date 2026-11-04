@@ -45,7 +45,9 @@ input, notifications, secrets or network access are requested through the host A
 - **Pause view:** freezes the displayed snapshot for inspection; collection continues. Resume shows
   the latest snapshot. The time-scale slider or Ctrl/Command-wheel adjusts the visible window; horizontal wheel or Shift-wheel pans it. Ordinary vertical scrolling moves through the page and tracks. Project bands with recorded communication are placed near one another. Only agents with observed activity, a completion or spawn, or a coordination message in the selected window are shown; an old completed or unobserved state alone does not keep a lane visible. The From and To fields select local-time endpoints within the retained history. Nearby messages between the same agents collapse into a count; select it to inspect each message.
 
-Project bands use the saved project catalog and project-group membership, including folder workspaces; unresolvable membership is shown as unavailable. Workspace remains a secondary identity. Agent lanes prefer recorded names: user-renamed conversations, saved conversation names,
+Project bands use the saved project catalog and project-group membership, including folder workspaces; unresolvable membership is shown as unavailable. Workspace remains a secondary identity. Agent lanes show Orca harness icons and a short session identifier. Native Chat pane events
+join their saved conversation records, including older Codex/Claude handle formats.
+Agent lanes prefer recorded names: user-renamed conversations, saved conversation names,
 orchestration task names, then terminal titles. Lower-priority observations never replace a
 known name. Unnamed history keeps its provider/ID fallback. Canonical IDs stay stable when names
 change; available Orca/provider session IDs, pane keys, terminal handles and orchestration IDs

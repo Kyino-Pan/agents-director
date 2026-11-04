@@ -1,3 +1,22 @@
+export function bindStructuredPane(store, paneKey) {
+  const tab = paneKey?.split(':')[0]
+  const prefix = 'structured-agent-session-'
+  if (!tab?.startsWith(prefix) || tab.length === prefix.length) {
+    return undefined
+  }
+  const sessionId = tab.slice(prefix.length)
+  const id = store.agent(`session:${sessionId}`, { sessionId }, [`orca_session_id:${sessionId}`])
+  const alias = `pane:${paneKey}`
+  const previous = store.aliases.get(alias)
+  const agent = store.agents.get(previous)
+  if (previous && previous !== id && (!agent?.sessionId || agent.sessionId === sessionId)) {
+    store.merge(previous, id)
+  }
+  store.aliases.set(alias, id)
+  store.agent(id, { paneKey })
+  return id
+}
+
 export class SessionRouting {
   endpoints = new Map()
 

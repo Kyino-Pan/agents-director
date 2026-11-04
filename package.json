@@ -7,15 +7,17 @@
   "scripts": {
     "build": "node build-navigation.mjs",
     "test": "node --test --test-concurrency=2 *.test.mjs worker/*.test.mjs",
-    "lint": "oxlint --deny-warnings *.mjs worker/*.mjs",
-    "format:check": "oxfmt --check *.mjs worker/*.mjs *.json *.md *.html *.css assets/preview-theme.css",
+    "lint": "oxlint --deny-warnings *.mjs worker/*.mjs scripts/*.mjs assets/orca-harness-icons.mjs",
+    "format:check": "oxfmt --check *.mjs worker/*.mjs *.json *.md *.html *.css assets/preview-theme.css scripts/*.mjs assets/orca-harness-icons.mjs docs/*.md",
     "preview": "node preview.mjs"
   },
   "devDependencies": {
     "esbuild": "0.28.2",
     "oxfmt": "0.74.0",
     "oxlint": "1.89.0",
-    "playwright": "1.58.2"
+    "playwright": "1.58.2",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
   },
   "engines": {
     "node": ">=22.13"

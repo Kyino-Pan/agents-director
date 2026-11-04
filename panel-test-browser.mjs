@@ -18,6 +18,8 @@ before(async () => {
       '/panel.css': ['panel.css', 'text/css'],
       '/panel.mjs': ['panel.mjs', 'text/javascript'],
       '/panel-identity.mjs': ['panel-identity.mjs', 'text/javascript'],
+      '/panel-harness.mjs': ['panel-harness.mjs', 'text/javascript'],
+      '/assets/orca-harness-icons.mjs': ['assets/orca-harness-icons.mjs', 'text/javascript'],
       '/panel-actions.mjs': ['panel-actions.mjs', 'text/javascript'],
       '/lane-order.mjs': ['lane-order.mjs', 'text/javascript'],
       '/lane-motion.mjs': ['lane-motion.mjs', 'text/javascript'],
