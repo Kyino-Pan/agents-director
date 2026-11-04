@@ -36,6 +36,9 @@ let rerun = false
 let selection = null
 let disposed = false
 let subscription
+let resizeFrame = null
+let renderedWidth = 0
+let renderedHeight = 0
 const laneMotion = createLaneMotion($('lanes'), $('chart'))
 
 function node(tag, className, text) {
@@ -116,6 +119,7 @@ function render() {
   if (!displayed) {
     return
   }
+  const activeKey = document.hasFocus() ? document.activeElement?.getAttribute('data-key') : null
   const previousLanes = laneMotion.capture()
   const snapshot = displayed
   renderZoom(snapshot)
@@ -180,12 +184,13 @@ function render() {
   }
   $('empty').hidden = true
   $('chart-scroll').hidden = false
+  renderedWidth = $('chart-scroll').clientWidth
+  renderedHeight = $('chart-scroll').clientHeight
   height = Math.max(height, $('chart-scroll').clientHeight - 34)
   const width = Math.max(600, $('plot').clientWidth)
   const padding = 28
   const x = (at) => padding + ((at - start) / Math.max(1, end - start)) * (width - padding * 2)
   const center = (id) => positions.get(id)
-  const activeKey = document.activeElement?.getAttribute('data-key')
   const labels = []
   let lastProject
   for (const agent of agents) {
@@ -361,7 +366,7 @@ function render() {
   }
   laneMotion.apply(previousLanes, positions)
   renderDetail()
-  if (activeKey) {
+  if (activeKey && document.hasFocus()) {
     Array.from(document.querySelectorAll('[data-key]'))
       .find((element) => element.dataset.key === activeKey)
       ?.focus({ preventScroll: true })
@@ -594,9 +599,22 @@ document.addEventListener('keydown', (event) => {
     closeDetail()
   }
 })
-const resize = new ResizeObserver(() => render())
+const viewportChanged = () =>
+  $('chart-scroll').clientWidth !== renderedWidth ||
+  $('chart-scroll').clientHeight !== renderedHeight
+const resize = new ResizeObserver(() => {
+  if (disposed || resizeFrame !== null || !viewportChanged()) {
+    return
+  }
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = null
+    if (!disposed && viewportChanged()) {
+      render()
+    }
+  })
+})
 installActivityActions(() => displayed)
-resize.observe($('plot'))
+resize.observe($('chart-scroll'))
 if (window.orca?.plugin?.on) {
   subscription = window.orca.plugin.on('activity.changed', () => void refresh())
 }
@@ -607,6 +625,7 @@ window.addEventListener(
     disposed = true
     window.clearInterval(timer)
     resize.disconnect()
+    cancelAnimationFrame(resizeFrame)
     laneMotion.dispose()
     void preferences.flush()
     subscription?.dispose()

@@ -325,10 +325,16 @@ test('thin history tracks keep accessible states and generous targets in both ho
     assert.equal(await page.locator('#chart text, #chart pattern').count(), 0)
     for (const state of ['working', 'blocked', 'waiting', 'done', 'unknown']) {
       const segment = page.locator(`.segment.${state}`).first()
-      const box = await segment.boundingBox()
+      const dimensions = await segment.evaluate((element) => ({
+        visible: element.getClientRects().length > 0,
+        height: element.getBoundingClientRect().height,
+        hitHeight: element.parentElement.querySelector('.segment-hit').getBoundingClientRect()
+          .height
+      }))
       const target = segment.locator('..')
-      assert.ok(box.height <= 6)
-      assert.ok((await target.locator('.segment-hit').boundingBox()).height >= 24)
+      assert.ok(dimensions.visible)
+      assert.ok(dimensions.height <= 6)
+      assert.ok(dimensions.hitHeight >= 24)
       assert.equal(await segment.evaluate((element) => getComputedStyle(element).stroke), 'none')
       await target.focus()
       await page.keyboard.press('Enter')
