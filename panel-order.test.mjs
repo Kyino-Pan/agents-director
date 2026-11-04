@@ -155,7 +155,7 @@ test('reorder motion keeps lanes, activity and connector endpoints aligned, incl
   }
 })
 
-test('horizontal gestures keep lanes still through filtering and refresh, then reorder once when idle', async () => {
+test('horizontal gestures keep existing lanes still while new activity and connections enter immediately', async () => {
   const data = structuredClone(snapshot)
   const hour = 3600000
   data.agents = [
@@ -169,13 +169,15 @@ test('horizontal gestures keep lanes still through filtering and refresh, then r
     projectName: 'Project',
     segments: [
       {
-        start: id === 'older' ? end : data.now - 72 * hour,
+        start: id === 'older' ? end - hour : data.now - 72 * hour,
         end,
-        state: id === 'older' ? 'done' : 'working'
+        state: 'working'
       }
     ]
   }))
-  data.messages = []
+  data.agents[2].parentId = 'a'
+  data.agents[2].spawnedAt = data.now - 25 * hour
+  data.messages = [{ id: 'older-message', from: 'older', to: 'a', at: data.now - 25 * hour }]
   const { page, errors } = await pageFor({ data })
   try {
     const lanes = () =>
@@ -185,11 +187,18 @@ test('horizontal gestures keep lanes still through filtering and refresh, then r
     const during = await page.evaluate(async () => {
       const chart = document.getElementById('chart-scroll')
       const states = []
-      for (const deltaX of [-50, -25, 10]) {
+      for (const deltaX of [-50, -25, 75, -65]) {
         chart.dispatchEvent(new WheelEvent('wheel', { deltaX, cancelable: true, bubbles: true }))
         await new Promise(requestAnimationFrame)
         states.push({
           ids: [...document.querySelectorAll('.lane')].map((lane) => lane.dataset.agent),
+          olderBars: document.querySelectorAll('.segment-target[data-agent="older"]').length,
+          messages: document.querySelectorAll('[data-message="older-message"]').length,
+          spawns: document.querySelectorAll('.spawn').length,
+          messageX: document.querySelector('[data-message="older-message"]')?.dataset.x,
+          centers: [...document.querySelectorAll('.lane')]
+            .slice(0, 2)
+            .map((lane) => lane.getBoundingClientRect().top),
           motion: document.getAnimations().filter((animation) => animation.id === 'lane-reorder')
             .length
         })
@@ -206,12 +215,22 @@ test('horizontal gestures keep lanes still through filtering and refresh, then r
       return states
     })
     for (const state of during) {
-      assert.deepEqual(state.ids, ['b', 'a'])
+      assert.deepEqual(state.ids, ['b', 'a', 'older'])
       assert.equal(state.motion, 0)
     }
+    for (const index of [0, 1, 3]) {
+      assert.equal(during[index].olderBars, 1)
+      assert.equal(during[index].messages, 1)
+      assert.equal(during[index].spawns, 1)
+      assert.deepEqual(during[index].centers, during[0].centers)
+    }
+    assert.notEqual(during[0].messageX, during[1].messageX)
+    assert.equal(during[2].olderBars, 0)
+    assert.equal(during[2].messages, 0)
+    assert.equal(during[2].spawns, 0)
     assert.notEqual(await page.locator('#period').textContent(), period)
     await page.getByText('Updated while scrolling', { exact: true }).waitFor()
-    await page.waitForFunction(() => document.querySelectorAll('.lane').length === 3)
+    await page.waitForFunction(() => document.querySelector('.lane')?.dataset.agent === 'a')
     assert.deepEqual(await lanes(), ['a', 'b', 'older'])
     await page.evaluate(() =>
       Promise.all(document.getAnimations().map((animation) => animation.finished))

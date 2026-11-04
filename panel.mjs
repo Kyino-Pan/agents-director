@@ -1,4 +1,4 @@
-import { agentName, renderActivityDetail, visibleAgents } from './panel-identity.mjs'
+import { activeAgents, agentName, renderActivityDetail, visibleAgents } from './panel-identity.mjs'
 import { harnessIcon, harnessLabel, shortAgentId } from './panel-harness.mjs'
 import { installActivityActions, renderSources } from './panel-actions.mjs'
 import { createLaneMotion, spawnPath, messagePath } from './lane-motion.mjs'
@@ -133,10 +133,22 @@ function render() {
     Math.max(snapshot.windowStart + hours * HOUR, viewEnd ?? snapshot.now)
   )
   const start = Math.max(snapshot.windowStart, end - hours * HOUR)
+  const active = gestureAgents
+    ? activeAgents(snapshot, start, end)
+    : visibleAgents(snapshot, start, end, preferences.compactLanes)
+  if (gestureAgents) {
+    const placed = new Set(gestureAgents.map((agent) => agent.id))
+    for (const agent of active) {
+      if (!placed.has(agent.id)) {
+        gestureAgents.push(agent)
+        placed.add(agent.id)
+      }
+    }
+  }
   const currentAgents = new Map(snapshot.agents.map((agent) => [agent.id, agent]))
   const agents = gestureAgents
     ? gestureAgents.map((agent) => currentAgents.get(agent.id) ?? agent)
-    : visibleAgents(snapshot, start, end, preferences.compactLanes)
+    : active
   renderedAgents = agents
   const rowById = new Map(agents.map((agent, index) => [agent.id, index]))
   const positions = new Map()
@@ -178,10 +190,10 @@ function render() {
     selection = null
   }
   $('summary').textContent =
-    `${agents.length} of ${snapshot.agents.length} agents · ${messages.length} coordination messages`
+    `${active.length} of ${snapshot.agents.length} agents · ${messages.length} coordination messages`
   $('period').textContent = `${dateFormat.format(start)} – ${dateFormat.format(end)}`
   renderSources(snapshot, node, dateFormat)
-  $('view-empty').hidden = agents.length > 0
+  $('view-empty').hidden = active.length > 0
   if (!snapshot.agents.length) {
     setEmpty(
       'No activity observed yet',

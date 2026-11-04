@@ -167,14 +167,14 @@ export function renderActivityDetail(context) {
   }
 }
 
-export function visibleAgents(snapshot, start, end, compact = false) {
+export function activeAgents(snapshot, start, end) {
   const participants = new Set(
     snapshot.messages.flatMap((message) =>
       message.at >= start && message.at <= end ? [message.from, message.to] : []
     )
   )
   const query = $('search').value.trim().toLocaleLowerCase()
-  const agents = snapshot.agents.filter(
+  return snapshot.agents.filter(
     (agent) =>
       (participants.has(agent.id) ||
         (Number.isFinite(agent.spawnedAt) && agent.spawnedAt >= start && agent.spawnedAt <= end) ||
@@ -197,6 +197,10 @@ export function visibleAgents(snapshot, start, end, compact = false) {
           .includes(query)
       )
   )
+}
+
+export function visibleAgents(snapshot, start, end, compact = false) {
+  const agents = activeAgents(snapshot, start, end)
   const ids = new Set(agents.map((agent) => agent.id))
   const children = new Map()
   for (const agent of agents) {
