@@ -207,7 +207,7 @@ function render() {
   renderedWidth = $('chart-scroll').clientWidth
   renderedHeight = $('chart-scroll').clientHeight
   height = Math.max(height, $('chart-scroll').clientHeight - 34)
-  const width = Math.max(600, $('plot').clientWidth)
+  const width = Math.max(1, $('plot').clientWidth)
   const padding = 28
   const x = (at) => padding + ((at - start) / Math.max(1, end - start)) * (width - padding * 2)
   const center = (id) => positions.get(id)
@@ -261,12 +261,18 @@ function render() {
   defs.append(marker)
   chart.replaceChildren(defs)
   $('axis').replaceChildren()
-  for (let tick = 0; tick <= 6; tick++) {
-    const at = start + ((end - start) * tick) / 6
+  const ticks = Math.max(1, Math.min(6, Math.floor((width - padding * 2) / 100)))
+  for (let tick = 0; tick <= ticks; tick++) {
+    const at = start + ((end - start) * tick) / ticks
+    const compactDate = ticks <= 2 && hours >= 24
     const label = node(
       'span',
-      '',
-      hours > 24 ? (hours < 72 ? dayHourFormat : dayFormat).format(at) : timeFormat.format(at)
+      compactDate ? 'axis-date' : '',
+      compactDate
+        ? `${dayFormat.format(at)}\n${timeFormat.format(at)}`
+        : hours > 24
+          ? (hours < 72 ? dayHourFormat : dayFormat).format(at)
+          : timeFormat.format(at)
     )
     label.style.left = `${x(at)}px`
     $('axis').append(label)

@@ -63,6 +63,7 @@ summary:focus-visible,
   display: none !important;
 }
 .activity {
+  --lane-width: clamp(128px, 28vw, 200px);
   height: 100dvh;
   display: flex;
   flex-direction: column;
@@ -243,8 +244,7 @@ input::placeholder {
 }
 .chart-grid {
   display: grid;
-  grid-template-columns: 240px minmax(600px, 1fr);
-  min-width: 840px;
+  grid-template-columns: var(--lane-width) minmax(0, 1fr);
   min-height: 100%;
 }
 .labels {
@@ -354,6 +354,18 @@ input::placeholder {
   font-family: var(--font-mono);
   font-size: 11px;
   white-space: nowrap;
+}
+.axis span:first-child {
+  transform: none;
+}
+.axis span:last-child {
+  transform: translateX(-100%);
+  text-align: right;
+}
+.axis .axis-date {
+  top: 4px;
+  line-height: 1.2;
+  white-space: pre;
 }
 #chart {
   display: block;
@@ -587,10 +599,6 @@ input::placeholder {
     padding: 8px 12px;
     gap: 6px 10px;
   }
-  .chart-grid {
-    grid-template-columns: 160px minmax(600px, 1fr);
-    min-width: 760px;
-  }
   .lane,
   .label-heading {
     padding-left: 12px;
@@ -695,7 +703,7 @@ input::placeholder {
   position: absolute;
   left: 0;
   top: 64px;
-  width: min(100%, calc(100vw - 240px));
+  width: 100%;
   padding: 0 16px;
   text-align: center;
   color: var(--orca-muted-foreground);
@@ -704,9 +712,4 @@ input::placeholder {
 }
 .view-empty p {
   margin: 4px 0 0;
-}
-@media (max-width: 480px) {
-  .view-empty {
-    width: min(100%, calc(100vw - 160px));
-  }
 }

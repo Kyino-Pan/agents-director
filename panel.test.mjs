@@ -119,7 +119,7 @@ test('non-Mac click handling uses Control to open terminals', async () => {
   await page.close()
 })
 
-test('light, dark and sidebar layouts contain page overflow and preserve timeline scrolling', async () => {
+test('light, dark and sidebar layouts fit the full time window without horizontal overflow', async () => {
   const output = process.env.ACTIVITY_SCREENSHOTS
   if (output) {
     await mkdir(output, { recursive: true })
@@ -127,6 +127,9 @@ test('light, dark and sidebar layouts contain page overflow and preserve timelin
   for (const [name, width, dark] of [
     ['light', 1280, false],
     ['dark', 1280, true],
+    ['split-light', 600, false],
+    ['split-dark', 600, true],
+    ['narrow-light', 320, false],
     ['sidebar-light', 360, false],
     ['sidebar-dark', 360, true]
   ]) {
@@ -135,18 +138,39 @@ test('light, dark and sidebar layouts contain page overflow and preserve timelin
       await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
       true
     )
-    if (width < 480) {
-      assert.equal(
-        await page
-          .locator('#chart-scroll')
-          .evaluate((element) => element.scrollWidth > element.clientWidth),
-        true
+    await page.waitForFunction(() => {
+      const plot = document.getElementById('plot')
+      const chart = document.getElementById('chart')
+      return Math.abs(chart.viewBox.baseVal.width - plot.clientWidth) < 1
+    })
+    const layout = await page.evaluate(() => {
+      const scroll = document.getElementById('chart-scroll')
+      const labels = document.querySelector('.labels').getBoundingClientRect()
+      const plot = document.getElementById('plot').getBoundingClientRect()
+      const ticks = [...document.querySelectorAll('#axis span')].map((tick) =>
+        tick.getBoundingClientRect()
       )
-      await page.locator('#chart-scroll').evaluate((element) => {
-        element.scrollLeft = 200
-      })
-      assert.equal(Math.round((await page.locator('.labels').boundingBox()).x), 0)
-    }
+      const latest = [...document.querySelectorAll('.segment.current')].map((segment) =>
+        segment.getBoundingClientRect()
+      )
+      return {
+        fits: scroll.scrollWidth <= scroll.clientWidth + 1,
+        labelWidth: labels.width,
+        plotWidth: plot.width,
+        ticksFit: ticks.every(
+          (tick, index) =>
+            tick.left >= plot.left &&
+            tick.right <= plot.right &&
+            (!index || tick.left >= ticks[index - 1].right)
+        ),
+        latestVisible: latest.length > 0 && latest.every((segment) => segment.right <= innerWidth)
+      }
+    })
+    assert.ok(layout.fits, `Timeline fits ${width}px panel`)
+    assert.ok(layout.labelWidth <= 200)
+    assert.ok(layout.plotWidth >= width * 0.6)
+    assert.ok(layout.ticksFit)
+    assert.ok(layout.latestVisible)
     if (output) {
       await page.screenshot({ path: `${output}/${name}.png`, fullPage: true })
       await page.locator('.lane').first().click({ button: 'right' })

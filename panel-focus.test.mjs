@@ -62,8 +62,7 @@ test('viewport resizing settles without redraws driven by the chart content size
         const chart = document.getElementById('chart')
         const viewport = document.getElementById('chart-scroll')
         return (
-          chart.viewBox.baseVal.width ===
-            Math.max(600, document.getElementById('plot').clientWidth) &&
+          chart.viewBox.baseVal.width === document.getElementById('plot').clientWidth &&
           chart.viewBox.baseVal.height >= viewport.clientHeight - 34
         )
       })
