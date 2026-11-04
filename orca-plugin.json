@@ -70,8 +70,8 @@
       "kind": "settings:own"
     }
   ],
-  "repository": "https://github.com/Kyino-Pan/orca-agent-activity",
-  "homepage": "https://github.com/Kyino-Pan/orca-agent-activity",
+  "repository": "https://github.com/Kyino-Pan/agents-director",
+  "homepage": "https://github.com/Kyino-Pan/agents-director",
   "license": "MIT",
   "author": {
     "name": "Kyino-Pan",

@@ -39,7 +39,7 @@ Requires **Orca ≥1.4.246 / plugin Host API 1.2** on desktop.
 Open **Settings → Plugins → Add plugin → From a Git URL…** and enter:
 
 ```text
-https://github.com/Kyino-Pan/orca-agent-activity#main
+https://github.com/Kyino-Pan/agents-director#main
 ```
 
 Approve the access request, then open **tab-bar + → Agents Director** or the **Agents Director**

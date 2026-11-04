@@ -8,7 +8,7 @@ Requires **Orca >=1.4.246 / plugin Host API 1.2**.
 Open **Settings → Plugins → Add plugin → From a Git URL…** and enter:
 
 ```text
-https://github.com/Kyino-Pan/orca-agent-activity#main
+https://github.com/Kyino-Pan/agents-director#main
 ```
 
 The release includes its terminal-navigation bundle; installation needs no build or npm install.

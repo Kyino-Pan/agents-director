@@ -1,5 +1,5 @@
 {
-  "name": "orca-agent-activity",
+  "name": "agents-director",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
