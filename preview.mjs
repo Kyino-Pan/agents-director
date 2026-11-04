@@ -107,7 +107,7 @@ export async function startPreview({ directories = [defaultDataDirectory()], por
       if (route === 'bridge.mjs') {
         response.setHeader('content-type', 'text/javascript; charset=utf-8')
         response.end(`window.orca={locale:navigator.language,plugin:{request:async(name)=>{
-          if(name==='activity.navigate')throw new Error('Open Agent Activity inside Orca to navigate to a terminal.');
+          if(name==='activity.navigate')throw new Error('Open Agents Director inside Orca to navigate to a terminal.');
           if(name!=='activity.snapshot')throw new Error('Unknown preview request');
           const response=await fetch('./snapshot');if(!response.ok)throw new Error('Collector unavailable');
           return response.json();},on:()=>({dispose(){}})}};`)

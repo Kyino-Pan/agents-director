@@ -3,7 +3,7 @@
   "manifestVersion": 2,
   "execution": "trusted-worker",
   "id": "agent-activity",
-  "name": "Agent Activity",
+  "name": "Agents Director",
   "version": "0.1.0",
   "description": "A rolling 7-day agent timeline reconstructed from Orca logs, with live status updates and orchestration message arrows.",
   "engines": {
@@ -15,7 +15,7 @@
     "panels": [
       {
         "id": "activity",
-        "title": "Agent Activity",
+        "title": "Agents Director",
         "icon": "activity",
         "entry": "panel.html"
       }
@@ -23,7 +23,7 @@
     "customEditors": [
       {
         "id": "overview",
-        "title": "Agent Activity",
+        "title": "Agents Director",
         "extensions": [".orca-activity"],
         "entry": "panel.html",
         "priority": "default"
@@ -32,7 +32,7 @@
     "newFiles": [
       {
         "id": "overview",
-        "title": "Agent Activity",
+        "title": "Agents Director",
         "extension": ".orca-activity",
         "template": "overview.orca-activity"
       }
@@ -40,7 +40,7 @@
     "commands": [
       {
         "id": "refresh",
-        "title": "Agent Activity: Refresh logs"
+        "title": "Agents Director: Refresh logs"
       }
     ],
     "events": [

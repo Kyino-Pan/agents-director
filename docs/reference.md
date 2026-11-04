@@ -1,4 +1,4 @@
-# Agent Activity reference
+# Agents Director reference
 
 [Back to overview](../README.md)
 
@@ -8,7 +8,7 @@ Requires **Orca >=1.4.246 / plugin Host API 1.2**.
 Open **Settings → Plugins → Add plugin → From a Git URL…** and enter:
 
 ```text
-https://github.com/Kyino-Pan/orca-agent-activity#v0.1.0
+https://github.com/Kyino-Pan/orca-agent-activity#main
 ```
 
 The release includes its terminal-navigation bundle; installation needs no build or npm install.
@@ -19,9 +19,9 @@ Review and approve the access request Orca displays. The worker reads
 local source logs using Node, with private storage, settings and `agent:read` access. No terminal
 input, notifications, secrets or network access are requested through the host API.
 
-- **Full overview:** tab-bar **+ → Agent Activity**, or choose the new-file command **Agent Activity**.
+- **Full overview:** tab-bar **+ → Agents Director**, or choose the new-file command **Agents Director**.
   This opens an `.orca-activity` document in the main editor area, where the view can be split.
-- **Sidebar:** open the **Agent Activity** plugin panel.
+- **Sidebar:** open the **Agents Director** plugin panel.
 - **Inspect:** click an agent, state segment or message arrow to open a floating detail view;
   Close or Escape dismisses it. The timeline fills the remaining viewport height, and inspection
   does not shrink it. Arrow controls support keyboard selection.
@@ -114,7 +114,7 @@ segments and 600 messages; message previews are capped at 400 characters.
 ## Profiles and remote work
 
 The default source is this computer's platform-specific Orca data directory. Set **Plugins →
-Agent Activity → Orca data directories** to one absolute directory per line for alternate profiles
+Agents Director → Orca data directories** to one absolute directory per line for alternate profiles
 or read-only mounted/synchronized host copies, then restart the plugin worker. The collector does
 not SSH to hosts. Local orchestration records can include remote workers/messages, but their
 provider logs are read only when those files are available on the collector host. A copied remote

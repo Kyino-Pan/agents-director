@@ -458,7 +458,7 @@ async function refresh() {
   $('retry').disabled = true
   try {
     if (!window.orca?.plugin?.request) {
-      throw new Error('Open this panel in Orca with the Agent Activity plugin enabled.')
+      throw new Error('Open this panel in Orca with the Agents Director plugin enabled.')
     }
     const snapshot = await window.orca.plugin.request('activity.snapshot', {})
     if (disposed) {

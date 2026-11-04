@@ -1,4 +1,4 @@
-# Agent Activity
+# Agents Director
 
 See what your agents are doing across projects in one Orca timeline. Spot unexpected
 orchestration behavior, check whether agents are coordinating as expected, and focus on
@@ -39,10 +39,10 @@ Requires **Orca ≥1.4.246 / plugin Host API 1.2** on desktop.
 Open **Settings → Plugins → Add plugin → From a Git URL…** and enter:
 
 ```text
-https://github.com/Kyino-Pan/orca-agent-activity#v0.1.0
+https://github.com/Kyino-Pan/orca-agent-activity#main
 ```
 
-Approve the access request, then open **tab-bar + → Agent Activity** or the **Agent Activity**
+Approve the access request, then open **tab-bar + → Agents Director** or the **Agents Director**
 sidebar panel. No build step is needed.
 
 Free, MIT-licensed community plugin. Reads local agent logs and keeps a private history
