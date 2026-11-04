@@ -90,6 +90,7 @@ test('panning into an empty interval retains the chart and can pan straight back
       )
     )
     assert.equal(await page.locator('#period').textContent(), before)
+    await page.locator('#view-empty').waitFor({ state: 'hidden' })
     assert.equal(await page.locator('#view-empty').isHidden(), true)
     assert.equal(await page.locator('.lane-name').textContent(), 'Recent agent')
     assert.deepEqual(errors, [])

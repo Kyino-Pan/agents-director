@@ -40,6 +40,9 @@ let subscription
 let resizeFrame = null
 let renderedWidth = 0
 let renderedHeight = 0
+let renderedAgents = []
+let gestureAgents = null
+let gestureTimer
 const laneMotion = createLaneMotion($('lanes'), $('chart'))
 
 function node(tag, className, text) {
@@ -121,7 +124,7 @@ function render() {
     return
   }
   const activeKey = document.hasFocus() ? document.activeElement?.getAttribute('data-key') : null
-  const previousLanes = laneMotion.capture()
+  const previousLanes = gestureAgents ? new Map() : laneMotion.capture()
   const snapshot = displayed
   renderZoom(snapshot)
   $('shorten-links').setAttribute('aria-pressed', String(preferences.compactLanes))
@@ -130,7 +133,11 @@ function render() {
     Math.max(snapshot.windowStart + hours * HOUR, viewEnd ?? snapshot.now)
   )
   const start = Math.max(snapshot.windowStart, end - hours * HOUR)
-  const agents = visibleAgents(snapshot, start, end, preferences.compactLanes)
+  const currentAgents = new Map(snapshot.agents.map((agent) => [agent.id, agent]))
+  const agents = gestureAgents
+    ? gestureAgents.map((agent) => currentAgents.get(agent.id) ?? agent)
+    : visibleAgents(snapshot, start, end, preferences.compactLanes)
+  renderedAgents = agents
   const rowById = new Map(agents.map((agent, index) => [agent.id, index]))
   const positions = new Map()
   const headings = []
@@ -521,6 +528,19 @@ for (const id of ['range-start', 'range-end']) {
     setRange(Date.parse($('range-start').value), Date.parse($('range-end').value))
   )
 }
+function holdLanesDuringGesture() {
+  if (!gestureAgents) {
+    gestureAgents = renderedAgents
+    laneMotion.cancel()
+  }
+  clearTimeout(gestureTimer)
+  gestureTimer = setTimeout(() => {
+    gestureAgents = null
+    if (!disposed) {
+      render()
+    }
+  }, 180)
+}
 $('chart-scroll').addEventListener(
   'wheel',
   (event) => {
@@ -536,6 +556,7 @@ $('chart-scroll').addEventListener(
       return
     }
     event.preventDefault()
+    holdLanesDuringGesture()
     const end = viewEnd ?? displayed.now
     if (event.ctrlKey || event.metaKey) {
       const delta = Math.max(-100, Math.min(100, event.deltaY))
@@ -625,6 +646,7 @@ window.addEventListener(
   () => {
     disposed = true
     window.clearInterval(timer)
+    clearTimeout(gestureTimer)
     resize.disconnect()
     cancelAnimationFrame(resizeFrame)
     laneMotion.dispose()

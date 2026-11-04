@@ -32,6 +32,7 @@ export function createLaneMotion(lanes, chart) {
     }
   }
   return {
+    cancel,
     capture() {
       if (preference.matches || !lanes.getClientRects().length) {
         return new Map()

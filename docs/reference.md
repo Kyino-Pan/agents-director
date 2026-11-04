@@ -36,7 +36,9 @@ input, notifications, secrets or network access are requested through the host A
   to 24 hours and activity order. Reopening follows the latest time rather than a stale panned date.
   Reordered lanes, activity bars and connection endpoints move together over 200ms; system
   reduced-motion preferences disable the transition.
-- Panning into an empty interval keeps the timeline and scroll area available, with an in-chart
+- During wheel panning or zooming, lane membership and order stay fixed while the timeline moves.
+  After 180ms without wheel input, lanes filter and smoothly reorder once for the final window.
+  Panning into an empty interval keeps the timeline and scroll area available, with an in-chart
   message, so you can scroll back without resetting the window.
 - **Data sources:** right-click the view → **Data sources**. The coverage details open on demand.
 - **Go to terminal:** right-click an agent lane or segment → **Go to terminal**, or Command-click

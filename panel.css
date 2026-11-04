@@ -277,7 +277,7 @@ input::placeholder {
   text-align: left;
   border: 0;
   border-radius: 0;
-  background: transparent;
+  background: var(--orca-background);
   overflow: hidden;
 }
 .lane[data-selected='true'] {

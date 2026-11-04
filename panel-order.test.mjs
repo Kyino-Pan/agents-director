@@ -154,3 +154,79 @@ test('reorder motion keeps lanes, activity and connector endpoints aligned, incl
     await page.close()
   }
 })
+
+test('horizontal gestures keep lanes still through filtering and refresh, then reorder once when idle', async () => {
+  const data = structuredClone(snapshot)
+  const hour = 3600000
+  data.agents = [
+    { id: 'a', end: data.now - 2 * hour },
+    { id: 'b', end: data.now - hour },
+    { id: 'older', end: data.now - 25 * hour }
+  ].map(({ id, end }) => ({
+    id,
+    label: `Agent ${id}`,
+    projectId: 'p',
+    projectName: 'Project',
+    segments: [
+      {
+        start: id === 'older' ? end : data.now - 72 * hour,
+        end,
+        state: id === 'older' ? 'done' : 'working'
+      }
+    ]
+  }))
+  data.messages = []
+  const { page, errors } = await pageFor({ data })
+  try {
+    const lanes = () =>
+      page.locator('.lane').evaluateAll((elements) => elements.map((el) => el.dataset.agent))
+    assert.deepEqual(await lanes(), ['b', 'a'])
+    const period = await page.locator('#period').textContent()
+    const during = await page.evaluate(async () => {
+      const chart = document.getElementById('chart-scroll')
+      const states = []
+      for (const deltaX of [-50, -25, 10]) {
+        chart.dispatchEvent(new WheelEvent('wheel', { deltaX, cancelable: true, bubbles: true }))
+        await new Promise(requestAnimationFrame)
+        states.push({
+          ids: [...document.querySelectorAll('.lane')].map((lane) => lane.dataset.agent),
+          motion: document.getAnimations().filter((animation) => animation.id === 'lane-reorder')
+            .length
+        })
+      }
+      window.testSnapshot.agents[0].label = 'Updated while scrolling'
+      window.notifyActivity()
+      await Promise.resolve()
+      await Promise.resolve()
+      states.push({
+        ids: [...document.querySelectorAll('.lane')].map((lane) => lane.dataset.agent),
+        motion: document.getAnimations().filter((animation) => animation.id === 'lane-reorder')
+          .length
+      })
+      return states
+    })
+    for (const state of during) {
+      assert.deepEqual(state.ids, ['b', 'a'])
+      assert.equal(state.motion, 0)
+    }
+    assert.notEqual(await page.locator('#period').textContent(), period)
+    await page.getByText('Updated while scrolling', { exact: true }).waitFor()
+    await page.waitForFunction(() => document.querySelectorAll('.lane').length === 3)
+    assert.deepEqual(await lanes(), ['a', 'b', 'older'])
+    await page.evaluate(() =>
+      Promise.all(document.getAnimations().map((animation) => animation.finished))
+    )
+    assert.equal(
+      await page.evaluate(() => {
+        const rows = [...document.querySelectorAll('.lane')].map((lane) =>
+          lane.getBoundingClientRect()
+        )
+        return rows.every((row, index) => !index || row.top >= rows[index - 1].bottom)
+      }),
+      true
+    )
+    assert.deepEqual(errors, [])
+  } finally {
+    await page.close()
+  }
+})
