@@ -449,6 +449,7 @@ test('tails only Orca-referenced logs, waits for complete UTF-8 records, and han
 })
 
 test('collector records live changes, persists on shutdown, and restores history on restart', async (context) => {
+  context.mock.timers.enable({ apis: ['Date'], now: NOW })
   const { directory } = await fixture(context)
   const storage = new Map()
   const handlers = new Map()

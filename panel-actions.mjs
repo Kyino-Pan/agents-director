@@ -7,7 +7,8 @@ export function installActivityActions(getSnapshot) {
   let selectedAgent
   let pending = false
   let returnFocus
-  const hasAddress = (agent) => agent?.terminalHandle || (agent?.paneKey && agent?.workspace)
+  const hasAddress = (agent) =>
+    agent?.terminalHandle || ((agent?.paneKey || agent?.sessionId) && agent?.workspace)
   const agentAt = (target) => {
     const id = target.closest('[data-agent]')?.dataset.agent
     return getSnapshot()?.agents.find((agent) => agent.id === id)
@@ -18,14 +19,14 @@ export function installActivityActions(getSnapshot) {
     }
     pending = true
     feedback.hidden = false
-    feedback.textContent = 'Opening terminal…'
+    feedback.textContent = 'Opening agent…'
     try {
       if (!hasAddress(agent)) {
-        throw new Error('No terminal address was recorded for this agent.')
+        throw new Error('No navigation address was recorded for this agent.')
       }
       const result = await window.orca.plugin.request('activity.navigate', { agentId: agent.id })
       if (!result?.navigated) {
-        throw new Error('The terminal could not be opened.')
+        throw new Error('The agent could not be opened.')
       }
       feedback.hidden = true
     } catch (error) {
@@ -38,6 +39,12 @@ export function installActivityActions(getSnapshot) {
     selectedAgent = agentAt(target)
     returnFocus = target.closest('[data-agent]') || document.activeElement
     navigate.hidden = !selectedAgent
+    navigate.textContent =
+      selectedAgent?.sessionId &&
+      (!selectedAgent.terminalHandle ||
+        selectedAgent.paneKey?.startsWith('structured-agent-session-'))
+        ? 'Go to Chat'
+        : 'Go to terminal'
     navigate.disabled = !hasAddress(selectedAgent) || pending
     menu.showPopover()
     menu.style.left = `${Math.max(4, Math.min(x, innerWidth - menu.offsetWidth - 4))}px`

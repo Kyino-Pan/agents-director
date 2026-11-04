@@ -1,5 +1,6 @@
 import { resolve } from 'node:path'
 import { defaultDataDirectory } from './orca-log-reader.mjs'
+import { navigateSessionTab } from './session-tab-client.mjs'
 
 const runCli = async (args) => {
   const { runTerminalCli } = await import('../dist/terminal-cli.mjs').catch(() => {
@@ -8,7 +9,12 @@ const runCli = async (args) => {
   return runTerminalCli(args)
 }
 
-export function createTerminalNavigator(store, directories, command = runCli) {
+export function createTerminalNavigator(
+  store,
+  directories,
+  command = runCli,
+  navigateChat = navigateSessionTab
+) {
   let pending = false
   return async (input) => {
     if (pending) {
@@ -23,6 +29,12 @@ export function createTerminalNavigator(store, directories, command = runCli) {
     }
     pending = true
     try {
+      if (
+        agent.sessionId &&
+        (!agent.terminalHandle || agent.paneKey?.startsWith('structured-agent-session-'))
+      ) {
+        return await navigateChat(agent, directories[0])
+      }
       let handle = agent.terminalHandle
       let terminal
       if (handle) {

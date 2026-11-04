@@ -104,6 +104,37 @@ test('context actions and platform click navigate the selected agent, preserving
   await page.close()
 })
 
+test('native Chats without terminal handles or pane keys remain navigable from narrow lanes', async () => {
+  const data = structuredClone(snapshot)
+  const agent = data.agents[0]
+  agent.sessionId = 'native-chat'
+  agent.workspace = 'folder:project'
+  delete agent.terminalHandle
+  delete agent.paneKey
+  const { page, errors } = await pageFor({
+    width: 360,
+    data,
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'
+  })
+  try {
+    const lane = page.locator(`.lane[data-agent="${agent.id}"]`)
+    await lane.click({ button: 'right' })
+    const action = page.getByRole('menuitem', { name: 'Go to Chat', exact: true })
+    assert.equal(await action.isEnabled(), true)
+    await action.click()
+    assert.deepEqual(await page.evaluate(() => window.navigationRequest), { agentId: agent.id })
+    await page.evaluate(() => {
+      window.navigationRequest = null
+    })
+    await lane.click({ modifiers: ['Meta'] })
+    assert.deepEqual(await page.evaluate(() => window.navigationRequest), { agentId: agent.id })
+    assert.equal(await page.locator('#detail').isVisible(), false)
+    assert.deepEqual(errors, [])
+  } finally {
+    await page.close()
+  }
+})
+
 test('non-Mac click handling uses Control to open terminals', async () => {
   const { page, errors } = await pageFor({
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'

@@ -26,7 +26,7 @@ _Screenshots use synthetic data._
 - **Readable connections:** sort by recent activity or toggle **Shorter links** to bring
   connected agents closer together, with smooth transitions.
 - **Quick navigation:** click a state or message for details; Command-click an agent on macOS
-  or Ctrl-click on Windows/Linux to jump to its terminal. Right-click offers the same action.
+  or Ctrl-click on Windows/Linux to jump to its Chat or terminal. Right-click offers the same action.
 - **Flexible layout:** open a full editor tab or sidebar panel. Time-window duration and
   lane-order preferences persist between sessions.
 

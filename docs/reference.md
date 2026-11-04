@@ -42,9 +42,10 @@ input, notifications, secrets or network access are requested through the host A
   Panning into an empty interval keeps the timeline and scroll area available, with an in-chart
   message, so you can scroll back without resetting the window.
 - **Data sources:** right-click the view → **Data sources**. The coverage details open on demand.
-- **Go to terminal:** right-click an agent lane or segment → **Go to terminal**, or Command-click
+- **Go to Chat / terminal:** right-click an agent lane or segment → **Go to Chat** for native
+  sessions or **Go to terminal** for CLI agents, or Command-click
   on macOS / Ctrl-click on Windows and Linux. Ordinary clicks still inspect activity. Shift+F10
-  opens the same menu from the keyboard. Closed or disconnected terminals show a reason.
+  opens the same menu from the keyboard. Closed Chats and disconnected terminals show a reason.
 - **Pause view:** freezes the displayed snapshot for inspection; collection continues. Resume shows
   the latest snapshot. The time-scale slider or Ctrl/Command-wheel adjusts the visible window; horizontal wheel or Shift-wheel pans it. Ordinary vertical scrolling moves through the page and tracks. Project bands with recorded communication are placed near one another. Only agents with observed activity, a completion or spawn, or a coordination message in the selected window are shown; an old completed or unobserved state alone does not keep a lane visible. The From and To fields select local-time endpoints within the retained history. Nearby messages between the same agents collapse into a count; select it to inspect each message.
 
@@ -63,6 +64,10 @@ handle can be refreshed by exact workspace/pane only while the recorded conversa
 owns that pane. Navigation is disabled for imported data directories and browser previews;
 those cannot safely identify a terminal on the current desktop. Host-registered remote
 terminals follow the same CLI path; no new SSH connection is made by this plugin.
+Native Chats have no terminal handle. Their navigation uses Orca's local session-tab RPC over
+its Unix socket or Windows named pipe, with the host's ephemeral runtime credentials kept in
+memory. It finds the exact session in its recorded workspace, requests host-only activation,
+and waits for the selected tab to be confirmed. No prompt is sent and no new Chat is created.
 
 Coordinator project membership also uses saved terminal tabs and terminal-close records from
 the selected profile, so closing a terminal or losing its status cache does not lose a known
