@@ -59,10 +59,18 @@ const inventory = {
 
 test('native Chat navigation resolves the saved conversation without a terminal and waits for host selection', async (context) => {
   let selected = false
+  let visibleWorkspace = 'folder:other'
   const { directory, requests } = await runtime(context, ({ method, params }) => {
+    if (method === 'terminal.reveal') {
+      visibleWorkspace = params.worktreeId
+      return { result: { reveal: { ...params, navigated: true } } }
+    }
     if (method === 'session.tabs.activate') {
       selected =
-        params.tabId === chat.id && params.navigation === 'host' && params.intent === 'user'
+        visibleWorkspace === inventory.worktree &&
+        params.tabId === chat.id &&
+        params.navigation === 'host' &&
+        params.intent === 'user'
       return { result: inventory }
     }
     return { result: { ...inventory, activeTabId: selected ? chat.id : 'other' } }
@@ -84,10 +92,22 @@ test('native Chat navigation resolves the saved conversation without a terminal 
   assert.deepEqual(await navigate({ agentId: 'chat' }), { navigated: true })
   assert.ok(
     requests.every(
-      (request) => request.authenticated && request.params.worktree === 'id:folder:project'
+      (request) =>
+        request.authenticated &&
+        (request.method === 'terminal.reveal'
+          ? request.params.worktreeId === 'folder:project'
+          : request.params.worktree === 'id:folder:project')
     )
   )
   assert.equal(requests.filter((request) => request.method === 'session.tabs.activate').length, 1)
+  assert.deepEqual(
+    requests.slice(0, 3).map((request) => request.method),
+    ['session.tabs.list', 'terminal.reveal', 'session.tabs.activate']
+  )
+  assert.deepEqual(requests[1].params, {
+    worktreeId: 'folder:project',
+    tabId: chat.id
+  })
   assert.equal(requests.at(-1).method, 'session.tabs.list')
 })
 
@@ -102,7 +122,60 @@ test('missing, ambiguous and wrong-workspace Chat records never activate another
       navigateSessionTab({ sessionId: 'saved-chat', workspace: 'folder:project' }, directory),
       /no longer open/
     )
-    assert.equal(requests.filter((request) => request.method === 'session.tabs.activate').length, 0)
+    assert.deepEqual(
+      requests.map((request) => request.method),
+      ['session.tabs.list']
+    )
+  }
+})
+
+test('a Chat already selected in a background workspace still requires a desktop reveal', async (context) => {
+  const { directory, requests } = await runtime(context, ({ method, params }) => {
+    if (method === 'terminal.reveal') {
+      return { result: { reveal: { ...params, navigated: true } } }
+    }
+    return { result: { ...inventory, activeTabId: chat.id } }
+  })
+  assert.deepEqual(
+    await navigateSessionTab(
+      {
+        sessionId: chat.sessionId,
+        workspace: inventory.worktree
+      },
+      directory
+    ),
+    { navigated: true }
+  )
+  assert.deepEqual(
+    requests.map((request) => request.method),
+    ['session.tabs.list', 'terminal.reveal', 'session.tabs.activate']
+  )
+})
+
+test('a saved Chat selection cannot hide a refused, missing or misdirected desktop reveal', async (context) => {
+  for (const reveal of [
+    undefined,
+    { navigated: false, worktreeId: inventory.worktree, tabId: chat.id },
+    { navigated: true, worktreeId: 'folder:other', tabId: chat.id },
+    { navigated: true, worktreeId: inventory.worktree, tabId: 'other' }
+  ]) {
+    const { directory, requests } = await runtime(context, ({ method }) => ({
+      result: method === 'terminal.reveal' ? { reveal } : { ...inventory, activeTabId: chat.id }
+    }))
+    await assert.rejects(
+      navigateSessionTab(
+        {
+          sessionId: chat.sessionId,
+          workspace: inventory.worktree
+        },
+        directory
+      ),
+      /could not show this Chat workspace/
+    )
+    assert.deepEqual(
+      requests.map((request) => request.method),
+      ['session.tabs.list', 'terminal.reveal']
+    )
   }
 })
 

@@ -13,7 +13,7 @@ export async function createSessionTabClient(directory) {
     throw new Error('Orca session navigation is unavailable. Check that Orca is running.')
   }
   return (method, params) => {
-    if (!['session.tabs.list', 'session.tabs.activate'].includes(method)) {
+    if (!['session.tabs.list', 'session.tabs.activate', 'terminal.reveal'].includes(method)) {
       throw new Error('Unsupported session navigation operation.')
     }
     return new Promise((resolve, reject) => {
@@ -29,7 +29,7 @@ export async function createSessionTabClient(directory) {
         if (error) reject(error)
         else resolve(result)
       }
-      const timer = setTimeout(() => finish(new Error('Orca session navigation timed out.')), 8000)
+      const timer = setTimeout(() => finish(new Error('Orca session navigation timed out.')), 12000)
       socket.setEncoding('utf8')
       socket.once('connect', () => {
         socket.write(`${JSON.stringify({ id, authToken: metadata.authToken, method, params })}\n`)
@@ -93,6 +93,18 @@ export async function navigateSessionTab(agent, directory, connect = createSessi
     ) ?? []
   if (inventory?.worktree !== workspace || matches.length !== 1) {
     throw new Error('This Chat is no longer open in its recorded workspace.')
+  }
+  // Tab activation alone cannot reveal an inactive Chat workspace in Orca 1.4.248.
+  const { reveal } = await request('terminal.reveal', {
+    worktreeId: workspace,
+    tabId: matches[0].id
+  })
+  if (
+    reveal?.navigated !== true ||
+    reveal.worktreeId !== workspace ||
+    reveal.tabId !== matches[0].id
+  ) {
+    throw new Error('Orca could not show this Chat workspace in the current desktop.')
   }
   let result = await request('session.tabs.activate', {
     worktree,

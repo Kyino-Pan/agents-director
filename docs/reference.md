@@ -66,8 +66,12 @@ those cannot safely identify a terminal on the current desktop. Host-registered 
 terminals follow the same CLI path; no new SSH connection is made by this plugin.
 Native Chats have no terminal handle. Their navigation uses Orca's local session-tab RPC over
 its Unix socket or Windows named pipe, with the host's ephemeral runtime credentials kept in
-memory. It finds the exact session in its recorded workspace, requests host-only activation,
-and waits for the selected tab to be confirmed. No prompt is sent and no new Chat is created.
+memory. It finds the exact session in its recorded workspace, uses `terminal.reveal` to reveal
+that workspace with a desktop acknowledgement, then requests host-only Chat tab activation.
+This two-step route is needed because Orca 1.4.248 ignores Chat tab focus across workspaces.
+Both the desktop acknowledgement and selected tab must match; a saved selection alone is not
+proof of navigation. These calls run only on a navigation gesture, never during refresh.
+No prompt is sent and no new Chat is created.
 
 Coordinator project membership also uses saved terminal tabs and terminal-close records from
 the selected profile, so closing a terminal or losing its status cache does not lose a known
