@@ -371,46 +371,86 @@ test('old payloads and duplicate names retain separate stable identities across 
 })
 
 test('thin history tracks keep accessible states and generous targets in both host themes', async () => {
-  for (const dark of [false, true]) {
-    const { page, errors } = await pageFor({ dark })
-    assert.equal(
-      await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
-      dark ? 'dark' : 'light'
-    )
-    assert.equal(await page.locator('#chart text, #chart pattern').count(), 0)
-    for (const state of ['working', 'blocked', 'waiting', 'done', 'unknown']) {
-      const segment = page.locator(`.segment.${state}`).first()
-      const dimensions = await segment.evaluate((element) => ({
-        visible: element.getClientRects().length > 0,
-        height: element.getBoundingClientRect().height,
-        hitHeight: element.parentElement.querySelector('.segment-hit').getBoundingClientRect()
-          .height
-      }))
-      const target = segment.locator('..')
-      assert.ok(dimensions.visible)
-      assert.ok(dimensions.height <= 6)
-      assert.ok(dimensions.hitHeight >= 24)
-      assert.equal(await segment.evaluate((element) => getComputedStyle(element).stroke), 'none')
-      await target.focus()
-      await page.keyboard.press('Enter')
-      assert.match(
-        await page.locator('#detail-heading').textContent(),
-        new RegExp(state === 'unknown' ? 'Unobserved' : state, 'i')
+  const data = structuredClone(snapshot)
+  const ago = (hours) => data.now - hours * 3_600_000
+  data.agents = [
+    {
+      id: 'states',
+      label: 'Observed states',
+      projectId: 'p',
+      projectName: 'Project',
+      segments: ['working', 'blocked', 'waiting', 'done', 'working', 'unknown'].map(
+        (state, index) => ({
+          start: ago(12 - index * 2),
+          end: ago(10 - index * 2),
+          state,
+          source: 'fixture'
+        })
       )
-      if (state === 'unknown') {
-        assert.match(
-          await page.locator('#detail-body').textContent(),
-          /Missing or stale logs cannot confirm continued work/
-        )
-        assert.match(
-          await page.locator('#detail-body').textContent(),
-          /Last observed: Working through/
-        )
-      }
-      await page.keyboard.press('Escape')
     }
-    assert.deepEqual(errors, [])
-    await page.close()
+  ]
+  data.messages = []
+  for (const width of [1100, 320]) {
+    for (const dark of [false, true]) {
+      const { page, errors } = await pageFor({ width, height: 820, dark, data })
+      try {
+        await page.locator('.segment-target').first().waitFor({ state: 'visible' })
+        assert.equal(
+          await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
+          dark ? 'dark' : 'light'
+        )
+        assert.equal(await page.locator('#chart text, #chart pattern').count(), 0)
+        for (const state of ['working', 'blocked', 'waiting', 'done', 'unknown']) {
+          // A ResizeObserver redraw replaces SVG children. Resolve and measure within
+          // one browser task so a detached locator handle cannot supply zero geometry.
+          const dimensions = await page.evaluate((state) => {
+            const element = document.querySelector(`.segment.${state}`)
+            const rect = element.getBoundingClientRect()
+            const scroll = document.getElementById('chart-scroll').getBoundingClientRect()
+            return {
+              connected: element.isConnected,
+              visible: element.getClientRects().length > 0,
+              inViewport:
+                rect.left >= scroll.left &&
+                rect.right <= Math.min(scroll.right, innerWidth) &&
+                rect.top >= scroll.top &&
+                rect.bottom <= Math.min(scroll.bottom, innerHeight),
+              height: rect.height,
+              hitHeight: element.parentElement.querySelector('.segment-hit').getBoundingClientRect()
+                .height,
+              stroke: getComputedStyle(element).stroke
+            }
+          }, state)
+          const target = page.locator(`.segment.${state}`).first().locator('..')
+          const context = JSON.stringify({ width, dark, state, dimensions })
+          assert.ok(dimensions.connected && dimensions.visible, context)
+          assert.ok(dimensions.inViewport, context)
+          assert.ok(dimensions.height > 0 && dimensions.height <= 6, context)
+          assert.ok(dimensions.hitHeight >= 24, context)
+          assert.equal(dimensions.stroke, 'none', context)
+          await target.focus()
+          await page.keyboard.press('Enter')
+          assert.match(
+            await page.locator('#detail-heading').textContent(),
+            new RegExp(state === 'unknown' ? 'Unobserved' : state, 'i')
+          )
+          if (state === 'unknown') {
+            assert.match(
+              await page.locator('#detail-body').textContent(),
+              /Missing or stale logs cannot confirm continued work/
+            )
+            assert.match(
+              await page.locator('#detail-body').textContent(),
+              /Last observed: Working through/
+            )
+          }
+          await page.keyboard.press('Escape')
+        }
+        assert.deepEqual(errors, [])
+      } finally {
+        await page.close()
+      }
+    }
   }
 })
 
