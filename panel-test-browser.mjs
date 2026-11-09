@@ -53,7 +53,8 @@ export async function pageFor({
   data = snapshot,
   fail = false,
   userAgent,
-  preferences = new Map()
+  preferences = new Map(),
+  getSnapshot
 } = {}) {
   const page = await browser.newPage({
     viewport: { width, height },
@@ -63,10 +64,14 @@ export async function pageFor({
   })
   await page.exposeFunction('readViewPreference', (key) => preferences.get(key) ?? null)
   await page.exposeFunction('writeViewPreference', (key, value) => preferences.set(key, value))
+  if (getSnapshot) {
+    await page.exposeFunction('requestActivitySnapshot', getSnapshot)
+  }
   const errors = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.addInitScript(
     ({ data, fail }) => {
+      window.snapshotRequests = []
       window.testSnapshot = data
       window.testFail = fail
       window.orca = {
@@ -84,7 +89,10 @@ export async function pageFor({
             if (window.testFail) {
               throw new Error('Worker unavailable')
             }
-            return window.testSnapshot
+            window.snapshotRequests.push(input)
+            return window.requestActivitySnapshot
+              ? window.requestActivitySnapshot(input)
+              : window.testSnapshot
           },
           on: (_event, callback) => {
             window.notifyActivity = callback

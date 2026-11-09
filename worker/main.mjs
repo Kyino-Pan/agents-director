@@ -152,10 +152,12 @@ export default async function activate(orca) {
   }
 
   let ready
-  orca.panels.handle('activity.snapshot', async () => {
+  orca.panels.handle('activity.snapshot', async (input) => {
     await ready
     extendLive(Date.now())
-    return memory.snapshot(store.snapshot())
+    return memory.snapshot(
+      store.snapshot(Date.now(), { hideShortTasks: input?.hideShortTasks !== false })
+    )
   })
   orca.commands.register('refresh', async () => {
     await ready

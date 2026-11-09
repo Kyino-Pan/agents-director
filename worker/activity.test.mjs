@@ -476,18 +476,20 @@ test('collector records live changes, persists on shutdown, and restores history
   const at = Date.now() - 1000
   listener({ paneKey: 'live-pane', title: 'Live agent', state: 'working', receivedAt: at })
   listener({ paneKey: 'live-pane', title: 'Live agent', state: 'done', receivedAt: at + 500 })
-  let snapshot = await handlers.get('activity.snapshot')()
+  let snapshot = await handlers.get('activity.snapshot')({ hideShortTasks: false })
   assert.deepEqual(
     snapshot.agents
       .find((agent) => agent.label === 'Live agent')
       .segments.map((segment) => segment.state),
     ['working', 'done']
   )
+  assert.equal((await handlers.get('activity.snapshot')()).hiddenShortTasks, 1)
+  assert.equal((await handlers.get('activity.snapshot')()).agents.length, 0)
   await deactivate()
   assert.equal(disposed, 1)
   assert.equal(storage.get('activity-v1:head').version, 1)
   await activate(api)
-  snapshot = await handlers.get('activity.snapshot')()
+  snapshot = await handlers.get('activity.snapshot')({ hideShortTasks: false })
   assert.equal(
     snapshot.agents.some((agent) => agent.label === 'Live agent'),
     true
@@ -528,6 +530,19 @@ test('loopback preview serves the actual collector and rejects other paths, orig
       null,
       1
     )
+  const end = Date.now() - 1000
+  const shortTurn = {
+    kind: 'item',
+    epoch: 'e',
+    itemId: 'short-turn',
+    ts: end,
+    body: { kind: 'turn', startedAt: end - 1000, completedAt: end }
+  }
+  const journal = new DatabaseSync(join(directory, 'agent-session-journal.db'))
+  journal
+    .prepare('INSERT INTO journal_rows VALUES (?, ?, ?, ?, ?)')
+    .run('preview-short', 'e', 1, end, JSON.stringify(shortTurn))
+  journal.close()
   const preview = await startPreview({ directories: [directory] })
   context.after(() => preview.close())
   const response = await fetch(`${preview.url}snapshot`)
@@ -537,6 +552,17 @@ test('loopback preview serves the actual collector and rejects other paths, orig
     snapshot.sources.some((source) => source.name === 'Preview mode'),
     true
   )
+  assert.equal(snapshot.hiddenShortTasks, 1)
+  assert.equal(
+    snapshot.agents.some((agent) => agent.id === 'session:preview-short'),
+    false
+  )
+  const unfiltered = await (await fetch(`${preview.url}snapshot?hideShortTasks=false`)).json()
+  assert.equal(
+    unfiltered.agents.some((agent) => agent.id === 'session:preview-short'),
+    true
+  )
+  assert.equal((await (await fetch(`${preview.url}snapshot`)).json()).hiddenShortTasks, 1)
   const html = await (await fetch(preview.url)).text()
   assert.match(html, /bridge.mjs/)
   assert.match(html, /--orca-background:/)

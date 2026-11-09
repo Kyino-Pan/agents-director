@@ -14,6 +14,77 @@ const NAME_PRIORITY = {
 
 const namePriority = (agent) => NAME_PRIORITY[agent.labelSource] ?? 0
 
+const SHORT_TASK_MS = 3 * 60 * 1000
+
+function mergeIntervals(intervals) {
+  const merged = []
+  for (const [start, end] of intervals.sort((a, b) => a[0] - b[0])) {
+    const previous = merged.at(-1)
+    if (previous && previous[1] >= start) {
+      previous[1] = Math.max(previous[1], end)
+    } else if (end > start) {
+      merged.push([start, end])
+    }
+  }
+  return merged
+}
+
+// This measures observed execution, not terminal or conversation lifetime.
+function isFinishedShortTask(agent, points) {
+  const finish = points.at(-1)
+  if (
+    agent.incompleteActivityHistory ||
+    points.some((point) => point.unsettled) ||
+    finish?.state !== 'done' ||
+    points.some((point) => point.at === finish.at && point.state !== 'done')
+  ) {
+    return false
+  }
+  const work = []
+  const pauses = []
+  const coverage = []
+  for (let index = 0; index < points.length - 1; index++) {
+    const point = points[index]
+    const next = points[index + 1].at
+    if (point.state === 'working') {
+      if (!Number.isFinite(point.until) || point.until > finish.at) {
+        return false
+      }
+      work.push([point.at, point.until])
+      coverage.push([point.at, point.until])
+    } else if (point.state === 'done') {
+      coverage.push([point.at, Math.min(next, point.until ?? next)])
+    } else if (point.state !== 'unknown' && Number.isFinite(point.until)) {
+      const interval = [point.at, Math.min(next, point.until)]
+      pauses.push(interval)
+      coverage.push(interval)
+    }
+  }
+  const execution = mergeIntervals(work)
+  if (!execution.length) {
+    return false
+  }
+  const start = execution[0][0]
+  // Unknown observations and holes between bounded evidence cannot prove a short task.
+  if (
+    points.some(
+      (point) => point.state === 'unknown' && point.at >= start && point.at < finish.at
+    ) ||
+    !mergeIntervals(coverage).some(([from, to]) => from <= start && to >= finish.at)
+  ) {
+    return false
+  }
+  const excluded = mergeIntervals(pauses)
+  let executionMs = 0
+  for (const [from, to] of execution) {
+    executionMs += to - from
+    for (const [pauseStart, pauseEnd] of excluded) {
+      executionMs -= Math.max(0, Math.min(to, pauseEnd) - Math.max(from, pauseStart))
+    }
+  }
+  return executionMs > 0 && executionMs < SHORT_TASK_MS
+}
+
 export function timestamp(value) {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : null
@@ -180,6 +251,13 @@ export class ActivityStore {
   }
 
   prune(now = Date.now()) {
+    const forgetPoint = (id, point) => {
+      const agent = this.agents.get(point.agentId)
+      if (agent) {
+        agent.incompleteActivityHistory = true
+      }
+      this.points.delete(id)
+    }
     const cutoff = now - WINDOW_MS
     const anchors = new Map()
     for (const point of this.points.values()) {
@@ -197,12 +275,12 @@ export class ActivityStore {
     }
     for (const [id, point] of this.points) {
       if (point.at < cutoff && anchors.get(point.agentId) !== point) {
-        this.points.delete(id)
+        forgetPoint(id, point)
       }
     }
     for (const anchor of anchors.values()) {
       if (anchor.until === undefined || anchor.until < cutoff) {
-        this.points.delete(anchor.id)
+        forgetPoint(anchor.id, anchor)
       }
     }
     for (const [id, message] of this.messages) {
@@ -217,7 +295,11 @@ export class ActivityStore {
       this.limited = true
       const ordered = [...records.values()].sort((a, b) => a.at - b.at)
       for (const item of ordered.slice(0, records.size - MAX_RECORDS)) {
-        records.delete(item.id)
+        if (records === this.points) {
+          forgetPoint(item.id, item)
+        } else {
+          records.delete(item.id)
+        }
       }
     }
     trim(this.points)
@@ -248,7 +330,8 @@ export class ActivityStore {
     }
   }
 
-  snapshot(now = Date.now()) {
+  // Raw consumers retain the unfiltered view; panel/preview endpoints supply the preference.
+  snapshot(now = Date.now(), { hideShortTasks = false } = {}) {
     this.prune(now)
     const windowStart = now - WINDOW_MS
     const grouped = new Map()
@@ -260,7 +343,7 @@ export class ActivityStore {
       points.push(point)
       grouped.set(point.agentId, points)
     }
-    let budget = 4000
+    let hiddenShortTasks = 0
     const agents = [...this.agents.values()]
       .filter(
         (agent) =>
@@ -299,6 +382,10 @@ export class ActivityStore {
             points.push(point)
           }
         }
+        if (hideShortTasks && isFinishedShortTask(agent, ordered)) {
+          hiddenShortTasks++
+          return null
+        }
         const segments = []
         for (let index = 0; index < points.length; index++) {
           const point = points[index]
@@ -317,30 +404,33 @@ export class ActivityStore {
             })
           }
         }
-        if (segments.length > budget) {
-          this.limited = true
-        }
-        const bounded = budget > 0 ? segments.slice(-budget) : []
-        budget = Math.max(0, budget - bounded.length)
-        return { ...agent, ...this.projectFor(agent), segments: bounded }
+        return { ...agent, ...this.projectFor(agent), segments }
       })
+      .filter(Boolean)
       .sort((a, b) => a.label.localeCompare(b.label))
-    if (agents.length > 160 || this.messages.size > 600) {
-      this.limited = true
-    }
-    const visible = agents.slice(0, 160)
+    let limited = this.limited || agents.length > 160
+    let budget = 4000
+    const visible = agents.slice(0, 160).map((agent) => {
+      if (agent.segments.length > budget) {
+        limited = true
+      }
+      const segments = budget > 0 ? agent.segments.slice(-budget) : []
+      budget -= segments.length
+      return { ...agent, segments }
+    })
     const ids = new Set(visible.map((agent) => agent.id))
+    const messages = [...this.messages.values()]
+      .filter((message) => message.at <= now && ids.has(message.from) && ids.has(message.to))
+      .sort((a, b) => a.at - b.at)
     return {
       now,
       windowStart,
       agents: visible,
-      messages: [...this.messages.values()]
-        .filter((message) => message.at <= now && ids.has(message.from) && ids.has(message.to))
-        .sort((a, b) => a.at - b.at)
-        .slice(-600),
+      messages: messages.slice(-600),
       sources: [...this.sources.values()].slice(0, 200),
       collectingSince: this.collectingSince,
-      limited: this.limited
+      hiddenShortTasks,
+      limited: limited || messages.length > 600
     }
   }
 

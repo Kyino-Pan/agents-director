@@ -28,6 +28,7 @@ const dateFormat = new Intl.DateTimeFormat(locale, {
 })
 let latest = null
 let displayed = null
+let displayedHideShortTasks = null
 const preferences = await loadViewPreferences()
 let hours = preferences.hours
 let viewEnd = null
@@ -127,6 +128,7 @@ function render() {
   const previousLanes = gestureAgents ? new Map() : laneMotion.capture()
   const snapshot = displayed
   renderZoom(snapshot)
+  $('hide-short-tasks').setAttribute('aria-pressed', String(preferences.hideShortTasks))
   $('shorten-links').setAttribute('aria-pressed', String(preferences.compactLanes))
   const end = Math.min(
     snapshot.now,
@@ -195,9 +197,14 @@ function render() {
   renderSources(snapshot, node, dateFormat)
   $('view-empty').hidden = active.length > 0
   if (!snapshot.agents.length) {
+    $('lanes').replaceChildren()
+    $('chart').replaceChildren()
+    $('axis').replaceChildren()
     setEmpty(
-      'No activity observed yet',
-      'Start an Orca agent to see its activity here. Check Data sources if an existing agent is missing.'
+      snapshot.hiddenShortTasks ? 'Short tasks are hidden' : 'No activity observed yet',
+      snapshot.hiddenShortTasks
+        ? `${snapshot.hiddenShortTasks} finished ${snapshot.hiddenShortTasks === 1 ? 'task has' : 'tasks have'} less than 3 minutes of reliably observed execution. Turn off Hide short tasks (< 3 min) to show them.`
+        : 'Start an Orca agent to see its activity here. Check Data sources if an existing agent is missing.'
     )
     renderDetail()
     return
@@ -484,7 +491,12 @@ async function refresh() {
     if (!window.orca?.plugin?.request) {
       throw new Error('Open this panel in Orca with the Agents Director plugin enabled.')
     }
-    const snapshot = await window.orca.plugin.request('activity.snapshot', {})
+    const hideShortTasks = preferences.hideShortTasks
+    const snapshot = await window.orca.plugin.request('activity.snapshot', { hideShortTasks })
+    if (hideShortTasks !== preferences.hideShortTasks) {
+      rerun = true
+      return
+    }
     if (disposed) {
       return
     }
@@ -502,7 +514,8 @@ async function refresh() {
     latest = snapshot
     $('failure').hidden = true
     setConnection(paused ? 'paused' : 'live', paused ? 'View paused' : 'Live · 5s')
-    if (!paused || !displayed) {
+    if (!paused || !displayed || displayedHideShortTasks !== hideShortTasks) {
+      displayedHideShortTasks = hideShortTasks
       displayed = latest
       render()
     }
@@ -527,6 +540,14 @@ async function refresh() {
   }
 }
 
+$('hide-short-tasks').setAttribute('aria-pressed', String(preferences.hideShortTasks))
+$('hide-short-tasks').addEventListener('click', () => {
+  preferences.set({ hideShortTasks: !preferences.hideShortTasks })
+  $('hide-short-tasks').setAttribute('aria-pressed', String(preferences.hideShortTasks))
+  clearTimeout(gestureTimer)
+  gestureAgents = null
+  void refresh()
+})
 $('shorten-links').addEventListener('click', () => {
   preferences.set({ compactLanes: !preferences.compactLanes })
   render()

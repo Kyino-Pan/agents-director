@@ -1,4 +1,8 @@
-const KEYS = { hours: 'view:window-hours', compactLanes: 'view:compact-lanes' }
+const KEYS = {
+  hours: 'view:window-hours',
+  compactLanes: 'view:compact-lanes',
+  hideShortTasks: 'view:hide-short-tasks'
+}
 const valid = (key, value) =>
   key === 'hours'
     ? Number.isFinite(value) && value >= 1 / 60 && value <= 168
@@ -10,7 +14,7 @@ export async function loadViewPreferences(
     set: async (key, value) => localStorage.setItem(`agent-activity:${key}`, JSON.stringify(value))
   }
 ) {
-  const state = { hours: 24, compactLanes: false }
+  const state = { hours: 24, compactLanes: false, hideShortTasks: true }
   await Promise.all(
     Object.entries(KEYS).map(async ([key, storedKey]) => {
       try {

@@ -58,6 +58,7 @@ export function importJournalRow(store, sessionId, row, now) {
     const end = timestamp(turn.completedAt)
     if (start !== null) {
       store.point(`${key}:start`, id, start, 'working', 'journal', end ?? at)
+      store.points.get(`${key}:start`).unsettled = end === null
     }
     if (end !== null) {
       store.point(
@@ -78,6 +79,7 @@ export function importJournalRow(store, sessionId, row, now) {
     } else {
       store.points.get(pointId).until = resolvedAt ?? at
     }
+    store.points.get(pointId).unsettled = !state || state === 'pending'
     if (state && state !== 'pending') {
       store.point(
         `${key}:resolved`,
@@ -141,6 +143,7 @@ function importJournalChild(store, parentId, child, at, now, journalKey) {
     'journal',
     end ?? Math.min(at, now)
   )
+  store.points.get(`${key}:start`).unsettled = end === null
   if (state !== 'working' && end === null && at > start) {
     store.point(`${key}:state:${at}`, id, at, state, 'journal', at)
   }
@@ -165,6 +168,23 @@ export function importStatusRow(store, paneKey, row, now) {
       labelSource: taskName ? 'task' : title ? 'terminal' : 'fallback',
       provider,
       providerSessionId: native,
+      resumeTarget:
+        native && !paneKey.startsWith('structured-agent-session-')
+          ? {
+              kind: 'terminal',
+              provider,
+              providerSessionId: native,
+              providerSessionKey: clean(session?.key),
+              workspace: clean(row.worktreeId)?.replace(/^worktree:/, ''),
+              executionHostId:
+                row.connectionId === null
+                  ? 'local'
+                  : clean(row.connectionId)
+                    ? `ssh:${clean(row.connectionId)}`
+                    : undefined,
+              wslDistro: null
+            }
+          : undefined,
       paneKey,
       terminalHandle: clean(row.terminalHandle),
       workspace: clean(row.worktreeId),
@@ -238,6 +258,9 @@ export function importTranscriptRow(store, agentId, provider, row, fileKey) {
         'transcript',
         states[payload.type] === 'working' ? at : undefined
       )
+      if (states[payload.type] === 'working') {
+        store.points.get(`${fileKey}:${at}:${payload.type}`).unsettled = true
+      }
     }
     if (payload?.type === 'sub_agent_activity' && payload.agent_thread_id) {
       const childAt = timestamp(payload.occurred_at_ms) ?? at
@@ -260,6 +283,9 @@ export function importTranscriptRow(store, agentId, provider, row, fileKey) {
         'transcript',
         payload.kind === 'started' ? childAt : undefined
       )
+      if (payload.kind === 'started') {
+        store.points.get(`${fileKey}:${id}:${childAt}`).unsettled = true
+      }
     }
   }
   if (provider === 'claude') {
@@ -281,6 +307,9 @@ export function importTranscriptRow(store, agentId, provider, row, fileKey) {
         'transcript',
         state === 'working' ? at : undefined
       )
+      if (state === 'working') {
+        store.points.get(`${fileKey}:${row.uuid ?? at}`).unsettled = true
+      }
     }
   }
 }
@@ -300,6 +329,7 @@ function settleTranscriptWork(store, agentId, at) {
   }
   if (previous?.state === 'working') {
     previous.until = at
+    previous.unsettled = false
   }
 }
 
@@ -443,7 +473,15 @@ export class OrcaLogReader {
           sessionId: record.session_id,
           providerSessionId: providerHandle(value.providerHandleChain?.at(-1)?.handle).id,
           provider: clean(value.provider),
-          workspace: clean(value.location?.workspaceId)
+          workspace: clean(value.location?.workspaceId),
+          resumeTarget: {
+            kind: 'chat',
+            sessionId: record.session_id,
+            provider: clean(value.provider),
+            workspace: clean(value.location?.workspaceId)?.replace(/^worktree:/, ''),
+            executionHostId: clean(value.location?.executionHostId),
+            wslDistro: value.location?.wslDistro
+          }
         },
         aliases
       )
