@@ -77,6 +77,10 @@
     "name": "Kyino-Pan",
     "url": "https://github.com/Kyino-Pan"
   },
+  "cover": {
+    "path": "assets/cover.png",
+    "alt": "Synthetic Agents Director timeline: named agents grouped by project/worktree, activity bars, spawn/message arrows and a focused 10:10–10:25 window."
+  },
   "screenshots": [
     {
       "path": "assets/light.png",

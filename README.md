@@ -5,16 +5,20 @@ orchestration behavior, check whether agents are coordinating as expected, and f
 those active in the time window you care about—with less attention spent switching
 between conversations and terminals.
 
-![Agent activity timeline in light mode](assets/light.png)
+![Agents Director: named agents across projects and worktrees, connected by spawn and message links in one focused timeline](assets/cover.png)
+
+_Cover is a synthetic illustration, not a product screenshot._
 
 <details>
-<summary>Dark mode</summary>
+<summary>Product screenshots (light and dark)</summary>
+
+![Agent activity timeline in light mode](assets/light.png)
 
 ![Agent activity timeline in dark mode](assets/dark.png)
 
-</details>
-
 _Screenshots use synthetic data._
+
+</details>
 
 ## Features
 
