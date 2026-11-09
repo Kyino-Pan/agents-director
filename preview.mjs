@@ -96,20 +96,27 @@ export async function startPreview({ directories = [defaultDataDirectory()], por
       response.writeHead(404).end()
       return
     }
-    const route = request.url.slice(root.length)
+    const requestUrl = new URL(request.url, `http://${expectedHost}`)
+    const route = requestUrl.pathname.slice(root.length)
     try {
       if (route === 'snapshot') {
         await scan
         response.setHeader('content-type', 'application/json; charset=utf-8')
-        response.end(JSON.stringify(store.snapshot()))
+        response.end(
+          JSON.stringify(
+            store.snapshot(Date.now(), {
+              hideShortTasks: requestUrl.searchParams.get('hideShortTasks') !== 'false'
+            })
+          )
+        )
         return
       }
       if (route === 'bridge.mjs') {
         response.setHeader('content-type', 'text/javascript; charset=utf-8')
-        response.end(`window.orca={locale:navigator.language,plugin:{request:async(name)=>{
+        response.end(`window.orca={locale:navigator.language,plugin:{request:async(name,input)=>{
           if(name==='activity.navigate')throw new Error('Open Agents Director inside Orca to navigate to a terminal.');
           if(name!=='activity.snapshot')throw new Error('Unknown preview request');
-          const response=await fetch('./snapshot');if(!response.ok)throw new Error('Collector unavailable');
+          const response=await fetch('./snapshot?hideShortTasks='+String(input?.hideShortTasks!==false));if(!response.ok)throw new Error('Collector unavailable');
           return response.json();},on:()=>({dispose(){}})}};`)
         return
       }

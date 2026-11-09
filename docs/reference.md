@@ -36,6 +36,21 @@ input, notifications, secrets or network access are requested through the host A
   to 24 hours and activity order. Reopening follows the latest time rather than a stale panned date.
   Reordered lanes, activity bars and connection endpoints move together over 200ms; system
   reduced-motion preferences disable the transition.
+- **Hide short tasks (< 3 min):** enabled by default and saved alongside the window and lane-order
+  preferences. Turn it off to show short tasks again; collection and the raw history cache are
+  unchanged. It hides only finished tasks with a positive, reliably observed cumulative execution
+  duration **strictly below 3 minutes**. Exactly 3 minutes stays visible. This measures observed
+  execution in the retained history, not process lifetime or time since creation: overlapping
+  execution observations count once, while done/idle, approval/question, and unknown gaps never
+  count as execution. Active, approval/question, completion-only, unbounded, unsettled, contradictory, or
+  trimmed histories stay visible; unexplained gaps between execution and completion also keep a
+  task visible. A completed/idle turn does not prove that its terminal process exited. Future work
+  in that conversation makes it visible again. Classification uses all retained observations,
+  independent of search, panning, zoom and viewport width. Filtering precedes lane, segment and
+  message snapshot budgets. Messages require both returned endpoints; children retain their
+  recorded parent ID even when that parent is outside the snapshot, without a substitute target.
+  Changing the filter requests fresh data, including while paused; all other view preferences
+  remain in place. If every task is hidden, the empty state explains how to turn the filter off.
 - During wheel panning or zooming, existing lane positions stay fixed. New agents append at the
   bottom so their activity, spawn links and messages appear immediately as the timeline moves.
   After 180ms without wheel input, lanes filter, regroup and smoothly reorder for the final window.

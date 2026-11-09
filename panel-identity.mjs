@@ -79,6 +79,11 @@ $('identity-list').addEventListener('click', async (event) => {
   }
 })
 
+function parentName(snapshot, id) {
+  const parent = snapshot.agents.find((agent) => agent.id === id)
+  return parent ? agentName(parent) : `${id} (outside this snapshot)`
+}
+
 export function renderActivityDetail(context) {
   const {
     selection,
@@ -147,7 +152,7 @@ export function renderActivityDetail(context) {
       $('detail-heading').textContent = agentName(agent)
       $('detail-meta').textContent = [agent.provider, agent.workspace].filter(Boolean).join(' · ')
       $('detail-body').textContent = agent.parentId
-        ? `Child of ${agentName(displayed.agents.find((item) => item.id === agent.parentId))}`
+        ? `Child of ${parentName(displayed, agent.parentId)}`
         : 'Agent identity and observed activity.'
       const last = agent.segments.at(-1)
       if (stateOf(last) === 'unknown') {
@@ -160,7 +165,7 @@ export function renderActivityDetail(context) {
     $('detail-meta').textContent =
       `${dateFormat.format(segment.start)} – ${dateFormat.format(segment.end)} · ${duration(segment.end - segment.start)}`
     $('detail-body').textContent =
-      `Observed via ${segment.source || 'an unknown source'}.\n${agent.workspace || 'Workspace unavailable'}${agent.parentId ? `\nParent agent: ${agentName(displayed.agents.find((item) => item.id === agent.parentId))}` : ''}`
+      `Observed via ${segment.source || 'an unknown source'}.\n${agent.workspace || 'Workspace unavailable'}${agent.parentId ? `\nParent agent: ${parentName(displayed, agent.parentId)}` : ''}`
     if (state === 'unknown') {
       $('detail-body').textContent = unobservedDescription(agent, segment)
     }
