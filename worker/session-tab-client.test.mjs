@@ -126,7 +126,7 @@ test('missing, ambiguous and wrong-workspace Chat records never activate another
     const { directory, requests } = await runtime(context, () => ({ result: value }))
     await assert.rejects(
       navigateSessionTab({ sessionId: 'saved-chat', workspace: 'folder:project' }, directory),
-      /no longer open/
+      /no longer open|identity and execution host were not recorded/
     )
     assert.deepEqual(
       requests.map((request) => request.method),
@@ -197,4 +197,284 @@ test('session runtime failures and replacement hosts cannot report successful na
     const request = await createSessionTabClient(directory)
     await assert.rejects(request('session.tabs.list', { worktree: 'id:folder:project' }))
   }
+})
+
+const savedChat = {
+  sessionId: chat.sessionId,
+  workspace: inventory.worktree,
+  provider: 'codex',
+  resumeTarget: {
+    kind: 'chat',
+    sessionId: chat.sessionId,
+    workspace: inventory.worktree,
+    provider: 'codex',
+    executionHostId: 'local',
+    wslDistro: null
+  }
+}
+const capabilities = ['agent-session.structured.v1', 'agent-session.structured.reveal.v1']
+const checkDirectory = async () => ({ isDirectory: () => true })
+
+test('closed native Chat republishes the original Orca session and then confirms desktop focus', async (context) => {
+  let reopened = false
+  const { directory, requests } = await runtime(context, ({ method, params }) => {
+    if (method === 'status.get') return { result: { capabilities, graphStatus: 'ready' } }
+    if (method === 'worktree.show')
+      return {
+        result: { worktree: { id: inventory.worktree, hostId: 'local', path: '/original' } }
+      }
+    if (method === 'agentSession.reveal') {
+      reopened = true
+      assert.deepEqual(params, { sessionId: chat.sessionId })
+      return {
+        result: {
+          ok: true,
+          sessionId: chat.sessionId,
+          workspaceId: inventory.worktree,
+          agent: 'codex'
+        }
+      }
+    }
+    if (method === 'terminal.reveal') return { result: { reveal: { ...params, navigated: true } } }
+    return { result: { ...inventory, tabs: reopened ? [chat] : [], activeTabId: chat.id } }
+  })
+  assert.deepEqual(
+    await navigateSessionTab(
+      savedChat,
+      directory,
+      createSessionTabClient,
+      () => {},
+      checkDirectory
+    ),
+    { navigated: true }
+  )
+  assert.deepEqual(
+    requests.map((r) => r.method),
+    [
+      'session.tabs.list',
+      'status.get',
+      'worktree.show',
+      'agentSession.reveal',
+      'session.tabs.list',
+      'terminal.reveal',
+      'session.tabs.activate'
+    ]
+  )
+  assert.ok(requests.every((r) => r.authenticated))
+})
+
+test('closed Chat with an unsupported original host, missing workspace or missing API never reopens', async (context) => {
+  for (const [patch, status, worktree, reason] of [
+    [
+      { executionHostId: 'ssh:original' },
+      { capabilities, graphStatus: 'ready' },
+      {},
+      /original execution host/
+    ],
+    [
+      { wslDistro: 'Ubuntu' },
+      { capabilities, graphStatus: 'ready' },
+      {},
+      /original execution host/
+    ],
+    [{}, { capabilities: [], graphStatus: 'ready' }, {}, /does not support/],
+    [
+      {},
+      { capabilities, graphStatus: 'ready' },
+      { id: 'other', hostId: 'local' },
+      /workspace is missing/
+    ],
+    [
+      {},
+      { capabilities, graphStatus: 'ready' },
+      { id: inventory.worktree, hostId: 'ssh:replacement' },
+      /host no longer matches/
+    ]
+  ]) {
+    const { directory, requests } = await runtime(context, ({ method }) => ({
+      result:
+        method === 'status.get'
+          ? status
+          : method === 'worktree.show'
+            ? { worktree }
+            : { ...inventory, tabs: [] }
+    }))
+    await assert.rejects(
+      navigateSessionTab(
+        { ...savedChat, resumeTarget: { ...savedChat.resumeTarget, ...patch } },
+        directory,
+        createSessionTabClient,
+        () => {},
+        checkDirectory
+      ),
+      reason
+    )
+    assert.equal(
+      requests.some((r) => r.method === 'agentSession.reveal'),
+      false
+    )
+  }
+})
+
+test('a lost Chat reopen reply is not repeated and can recover through the existing Chat inventory', async () => {
+  const store = new ActivityStore()
+  store.agent('chat', savedChat)
+  let reopened = false
+  let reveals = 0
+  let loseReply = true
+  const request = async (method, params) => {
+    if (method === 'status.get') return { capabilities, graphStatus: 'ready' }
+    if (method === 'worktree.show')
+      return { worktree: { id: inventory.worktree, hostId: 'local', path: '/original' } }
+    if (method === 'agentSession.reveal') {
+      reveals++
+      if (loseReply) throw new Error('reply lost')
+      reopened = true
+      return {
+        ok: true,
+        sessionId: chat.sessionId,
+        workspaceId: inventory.worktree,
+        agent: 'codex'
+      }
+    }
+    if (method === 'terminal.reveal') return { reveal: { ...params, navigated: true } }
+    return { ...inventory, tabs: reopened ? [chat] : [], activeTabId: chat.id }
+  }
+  const navigate = createTerminalNavigator(
+    store,
+    [defaultDataDirectory()],
+    undefined,
+    undefined,
+    async () => request,
+    checkDirectory
+  )
+  await assert.rejects(navigate({ agentId: 'chat' }), /reply lost/)
+  await assert.rejects(navigate({ agentId: 'chat' }), /already requested/)
+  assert.equal(reveals, 1)
+  reopened = true
+  assert.deepEqual(await navigate({ agentId: 'chat' }), { navigated: true })
+  assert.equal(reveals, 1)
+  reopened = false
+  loseReply = false
+  assert.deepEqual(await navigate({ agentId: 'chat' }), { navigated: true })
+  assert.equal(reveals, 2)
+})
+
+function chatNavigationFixture() {
+  const store = new ActivityStore()
+  store.agent('chat', savedChat)
+  const state = { tabs: [], workspace: inventory.worktree, reveals: 0, navigated: true }
+  const request = async (method, params) => {
+    if (method === 'status.get') return { capabilities, graphStatus: 'ready' }
+    if (method === 'worktree.show')
+      return { worktree: { id: inventory.worktree, hostId: 'local', path: '/original' } }
+    if (method === 'agentSession.reveal') {
+      state.reveals++
+      await state.reopen?.()
+      state.tabs = [chat]
+      return {
+        ok: true,
+        sessionId: chat.sessionId,
+        workspaceId: inventory.worktree,
+        agent: 'codex'
+      }
+    }
+    if (method === 'terminal.reveal') return { reveal: { ...params, navigated: state.navigated } }
+    return { ...inventory, worktree: state.workspace, tabs: state.tabs, activeTabId: chat.id }
+  }
+  const navigate = createTerminalNavigator(
+    store,
+    [defaultDataDirectory()],
+    undefined,
+    undefined,
+    async () => request,
+    checkDirectory
+  )
+  return { state, navigate: () => navigate({ agentId: 'chat' }) }
+}
+
+test('a successful native Chat reopen settles its fence before a later close and reopen', async () => {
+  const f = chatNavigationFixture()
+  assert.deepEqual(await f.navigate(), { navigated: true })
+  f.state.tabs = []
+  assert.deepEqual(await f.navigate(), { navigated: true })
+  assert.equal(f.state.reveals, 2)
+})
+
+test('only the exact Chat in its workspace settles uncertainty, independently of desktop reveal', async () => {
+  const f = chatNavigationFixture()
+  f.state.reopen = () => {
+    throw new Error('reply lost')
+  }
+  await assert.rejects(f.navigate(), /reply lost/)
+  f.state.tabs = [{ ...chat, sessionId: 'successor' }]
+  await assert.rejects(f.navigate(), /already requested/)
+  f.state.tabs = [chat]
+  f.state.workspace = 'folder:replacement'
+  await assert.rejects(f.navigate(), /no longer open/)
+  f.state.tabs = []
+  f.state.workspace = inventory.worktree
+  await assert.rejects(f.navigate(), /already requested/)
+  assert.equal(f.state.reveals, 1)
+
+  f.state.tabs = [chat]
+  f.state.navigated = false
+  await assert.rejects(f.navigate(), /could not show this Chat workspace/)
+  f.state.tabs = []
+  f.state.navigated = true
+  f.state.reopen = undefined
+  assert.deepEqual(await f.navigate(), { navigated: true })
+  assert.equal(f.state.reveals, 2)
+})
+
+test('an in-flight native Chat reopen still blocks duplicate navigation', async () => {
+  const f = chatNavigationFixture()
+  let release
+  let started
+  const requested = new Promise((resolve) => {
+    started = resolve
+  })
+  f.state.reopen = () => {
+    started()
+    return new Promise((resolve) => {
+      release = resolve
+    })
+  }
+  const first = f.navigate()
+  await requested
+  await assert.rejects(f.navigate(), /already in progress/)
+  assert.equal(f.state.reveals, 1)
+  release()
+  assert.deepEqual(await first, { navigated: true })
+  assert.equal(f.state.reveals, 1)
+})
+
+test('resume RPC allowlist admits saved identity only and rejects commands, prompts and extra fields', async (context) => {
+  const { directory, requests } = await runtime(context, () => ({ result: {} }))
+  const request = await createSessionTabClient(directory)
+  const valid = {
+    kind: 'explicit',
+    resumeOrigin: 'saved',
+    worktree: 'id:folder:original',
+    agent: 'codex',
+    providerSession: { key: 'session_id', id: 'saved-conversation' },
+    presentation: 'background'
+  }
+  await request('terminal.ensureAgentSession', valid)
+  await request('agentSession.reveal', { sessionId: 'saved-chat' })
+  for (const params of [
+    { ...valid, command: 'unsafe' },
+    { ...valid, prompt: 'new work' },
+    { ...valid, agent: 'unknown' },
+    { ...valid, resumeOrigin: undefined },
+    { ...valid, providerSession: { ...valid.providerSession, transcriptPath: '/arbitrary' } },
+    { ...valid, providerSession: { key: 'session_id', id: 'bad\nidentity' } }
+  ])
+    await assert.rejects(request('terminal.ensureAgentSession', params), /Unsupported/)
+  await assert.rejects(
+    request('agentSession.reveal', { sessionId: 'saved-chat', workspace: 'current' }),
+    /Unsupported/
+  )
+  await assert.rejects(request('terminal.createAgentSession', {}), /Unsupported/)
+  assert.equal(requests.length, 2)
 })

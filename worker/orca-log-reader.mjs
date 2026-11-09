@@ -168,6 +168,23 @@ export function importStatusRow(store, paneKey, row, now) {
       labelSource: taskName ? 'task' : title ? 'terminal' : 'fallback',
       provider,
       providerSessionId: native,
+      resumeTarget:
+        native && !paneKey.startsWith('structured-agent-session-')
+          ? {
+              kind: 'terminal',
+              provider,
+              providerSessionId: native,
+              providerSessionKey: clean(session?.key),
+              workspace: clean(row.worktreeId)?.replace(/^worktree:/, ''),
+              executionHostId:
+                row.connectionId === null
+                  ? 'local'
+                  : clean(row.connectionId)
+                    ? `ssh:${clean(row.connectionId)}`
+                    : undefined,
+              wslDistro: null
+            }
+          : undefined,
       paneKey,
       terminalHandle: clean(row.terminalHandle),
       workspace: clean(row.worktreeId),
@@ -456,7 +473,15 @@ export class OrcaLogReader {
           sessionId: record.session_id,
           providerSessionId: providerHandle(value.providerHandleChain?.at(-1)?.handle).id,
           provider: clean(value.provider),
-          workspace: clean(value.location?.workspaceId)
+          workspace: clean(value.location?.workspaceId),
+          resumeTarget: {
+            kind: 'chat',
+            sessionId: record.session_id,
+            provider: clean(value.provider),
+            workspace: clean(value.location?.workspaceId)?.replace(/^worktree:/, ''),
+            executionHostId: clean(value.location?.executionHostId),
+            wslDistro: value.location?.wslDistro
+          }
         },
         aliases
       )

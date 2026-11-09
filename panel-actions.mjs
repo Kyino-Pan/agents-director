@@ -8,7 +8,8 @@ export function installActivityActions(getSnapshot) {
   let pending = false
   let returnFocus
   const hasAddress = (agent) =>
-    agent?.terminalHandle || ((agent?.paneKey || agent?.sessionId) && agent?.workspace)
+    agent?.terminalHandle ||
+    ((agent?.paneKey || agent?.sessionId || agent?.providerSessionId) && agent?.workspace)
   const agentAt = (target) => {
     const id = target.closest('[data-agent]')?.dataset.agent
     return getSnapshot()?.agents.find((agent) => agent.id === id)
@@ -22,7 +23,11 @@ export function installActivityActions(getSnapshot) {
     feedback.textContent = 'Opening agent…'
     try {
       if (!hasAddress(agent)) {
-        throw new Error('No navigation address was recorded for this agent.')
+        throw new Error(
+          agent?.parentId
+            ? 'This internal subagent has no supported standalone resume identity. Open its parent conversation.'
+            : 'No conversation identity and original workspace were recorded for this agent.'
+        )
       }
       const result = await window.orca.plugin.request('activity.navigate', { agentId: agent.id })
       if (!result?.navigated) {
@@ -41,11 +46,12 @@ export function installActivityActions(getSnapshot) {
     navigate.hidden = !selectedAgent
     navigate.textContent =
       selectedAgent?.sessionId &&
-      (!selectedAgent.terminalHandle ||
+      (selectedAgent.resumeTarget?.kind === 'chat' ||
+        !selectedAgent.terminalHandle ||
         selectedAgent.paneKey?.startsWith('structured-agent-session-'))
-        ? 'Go to Chat'
-        : 'Go to terminal'
-    navigate.disabled = !hasAddress(selectedAgent) || pending
+        ? 'Open or resume Chat'
+        : 'Open or resume terminal'
+    navigate.disabled = pending
     menu.showPopover()
     menu.style.left = `${Math.max(4, Math.min(x, innerWidth - menu.offsetWidth - 4))}px`
     menu.style.top = `${Math.max(4, Math.min(y, innerHeight - menu.offsetHeight - 4))}px`
