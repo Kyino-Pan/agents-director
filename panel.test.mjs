@@ -244,15 +244,16 @@ test('dense timelines fill the available height and inspection does not shrink t
       `Timeline uses more than half the 1020px viewport at width ${width}`
     )
     assert.ok(Math.abs(before.y + before.height - 1020) <= 2)
-    const visibleRows = await page.locator('.lane').evaluateAll(
-      (lanes) =>
-        lanes.filter((lane) => {
-          const row = lane.getBoundingClientRect()
-          const viewport = document.getElementById('chart-scroll').getBoundingClientRect()
-          return row.top >= viewport.top && row.bottom <= viewport.bottom
-        }).length
-    )
-    assert.ok(visibleRows > 13)
+    // Query current lanes and their scroll viewport together; a resize redraw can
+    // detach a previously resolved array of lane elements before evaluation runs.
+    const visibleRows = await page.evaluate(() => {
+      const viewport = document.getElementById('chart-scroll').getBoundingClientRect()
+      return [...document.querySelectorAll('.lane')].filter((lane) => {
+        const row = lane.getBoundingClientRect()
+        return row.top >= viewport.top && row.bottom <= viewport.bottom
+      }).length
+    })
+    assert.ok(visibleRows > 13, `At ${width}px, ${visibleRows} complete rows are visible`)
     await page.locator('.lane').first().click()
     assert.equal(await page.locator('#detail').isVisible(), true)
     assert.deepEqual(await chart.boundingBox(), before)
