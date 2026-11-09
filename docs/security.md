@@ -18,7 +18,7 @@ same user's privileges. The plugin still asks for Full access.
   executable. There is no PATH fallback. Only exact `show`, `list` and `switch` argument shapes
   are admitted. Child processes receive a small environment allowlist, excluding loader flags,
   profile overrides, PATH and ambient API credentials. The launcher does not use a shell.
-- Chat navigation reads ephemeral runtime credentials only on demand. Metadata must be a
+- Chat navigation and on-demand memory sampling read ephemeral runtime credentials. Metadata must be a
   regular file in the source root and private to the current user on Unix. Only the socket
   matching Orca's PID/runtime naming is accepted: no TCP, WebSocket, remote pipe or object-form
   socket address. Unix socket ownership and directory write permissions are checked before
@@ -26,6 +26,9 @@ same user's privileges. The plugin still asks for Full access.
 - RPC methods are allowlisted, responses must match both request and runtime identity, total
   response bytes are capped at 1 MiB and requests time out. Tokens are never sent to the panel,
   stored in the history cache or logged.
+- Memory sampling uses only the local `diagnostics.memory` and workspace-scoped `terminal.list`
+  RPCs, at most once per 30 seconds. It adds no process scanner, file roots or capabilities.
+  Only current local terminal matches receive ephemeral memory values.
 - The panel supplies an agent ID, not a command or target address. Navigation resolves it
   against recorded ownership and the live host inventory. Imported sources cannot navigate.
 

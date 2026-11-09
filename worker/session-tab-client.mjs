@@ -13,7 +13,15 @@ export async function createSessionTabClient(directory) {
   )
   const endpoint = runtimeEndpoint(metadata, directory)
   return async (method, params) => {
-    if (!['session.tabs.list', 'session.tabs.activate', 'terminal.reveal'].includes(method)) {
+    if (
+      ![
+        'session.tabs.list',
+        'session.tabs.activate',
+        'terminal.reveal',
+        'diagnostics.memory',
+        'terminal.list'
+      ].includes(method)
+    ) {
       throw new Error('Unsupported session navigation operation.')
     }
     await validateRuntimeSocket(endpoint, directory)

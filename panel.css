@@ -307,6 +307,14 @@ input::placeholder {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.lane-memory {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--orca-muted-foreground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .lane-state {
   flex-shrink: 0;
   color: var(--orca-muted-foreground);

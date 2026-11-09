@@ -233,6 +233,24 @@ function render() {
     meta.append(status, node('span', 'lane-identity', shortAgentId(agent)))
     const heading = node('span', 'lane-heading')
     heading.append(harnessIcon(agent), node('span', 'lane-name', label))
+    const memory = agent.memory
+    if (
+      Number.isFinite(memory?.bytes) &&
+      memory.bytes >= 0 &&
+      ['footprint', 'rss', 'working-set'].includes(memory.metric) &&
+      Number.isFinite(memory.collectedAt)
+    ) {
+      const gib = memory.bytes >= 1024 ** 3
+      const value = gib
+        ? (memory.bytes / 1024 ** 3).toFixed(1)
+        : Math.round(memory.bytes / 1024 ** 2)
+      const text = `${value} ${gib ? 'GiB' : 'MiB'}`
+      const description = `Live terminal and child processes: ${text} (${memory.metric}), sampled ${new Date(memory.collectedAt).toLocaleTimeString()}`
+      const badge = node('span', 'lane-memory', text)
+      badge.title = description
+      heading.append(badge)
+      lane.setAttribute('aria-label', `${lane.getAttribute('aria-label')}. ${description}`)
+    }
     lane.append(heading, meta)
     labels.push(lane)
   }

@@ -46,6 +46,14 @@ input, notifications, secrets or network access are requested through the host A
   sessions or **Go to terminal** for CLI agents, or Command-click
   on macOS / Ctrl-click on Windows and Linux. Ordinary clicks still inspect activity. Shift+F10
   opens the same menu from the keyboard. Closed Chats and disconnected terminals show a reason.
+- **Terminal memory:** the name's right edge shows current terminal-and-child-process memory,
+  sampled at most every 30 seconds while the view requests updates. Units are MiB/GiB; hover
+  for the metric and sample time. macOS uses footprint, Linux RSS and Windows working set,
+  as reported by Orca diagnostics. This measures the terminal subtree, not an individual model.
+  Only exact current local terminal matches qualify. Historical agents, native Chats, internal
+  subagents without their own terminal, remote terminals and imported sources show no value.
+  Samples expire after 60 seconds and never enter the history cache. Pause freezes these values
+  along with the view; panning history still shows current memory for a currently owned terminal.
 - **Pause view:** freezes the displayed snapshot for inspection; collection continues. Resume shows
   the latest snapshot. The time-scale slider or Ctrl/Command-wheel adjusts the visible window; horizontal wheel or Shift-wheel pans it. Ordinary vertical scrolling moves through the page and tracks. Project bands with recorded communication are placed near one another. Only agents with observed activity, a completion or spawn, or a coordination message in the selected window are shown; an old completed or unobserved state alone does not keep a lane visible. The From and To fields select local-time endpoints within the retained history. Nearby messages between the same agents collapse into a count; select it to inspect each message.
 

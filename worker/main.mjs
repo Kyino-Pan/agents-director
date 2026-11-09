@@ -2,6 +2,7 @@ import { ActivityStore } from './activity-store.mjs'
 import { OrcaLogReader, defaultDataDirectory } from './orca-log-reader.mjs'
 import { createTerminalNavigator } from './terminal-navigation.mjs'
 import { bindStructuredPane } from './session-routing.mjs'
+import { TerminalMemory } from './terminal-memory.mjs'
 
 const STORAGE_PREFIX = 'activity-v1'
 let stop
@@ -29,6 +30,7 @@ export default async function activate(orca) {
   let oldChunks = 0
   let lastSave = 0
   let reader
+  let memory
   let initialized = false
   const pendingEvents = []
   const extendLive = (now) => {
@@ -153,7 +155,7 @@ export default async function activate(orca) {
   orca.panels.handle('activity.snapshot', async () => {
     await ready
     extendLive(Date.now())
-    return store.snapshot()
+    return memory.snapshot(store.snapshot())
   })
   orca.commands.register('refresh', async () => {
     await ready
@@ -194,6 +196,9 @@ export default async function activate(orca) {
             .filter(Boolean)
         : [defaultDataDirectory()]
     reader = new OrcaLogReader(store, [...new Set(directories)])
+    memory = new TerminalMemory(store, directories, () =>
+      orca.panels.post('activity.changed', { at: Date.now() })
+    )
     const navigate = createTerminalNavigator(store, directories)
     orca.panels.handle('activity.navigate', async (input) => {
       await ready
@@ -215,6 +220,7 @@ export default async function activate(orca) {
 
   stop = async () => {
     closing = true
+    memory?.close()
     clearTimeout(timer)
     subscription.dispose()
     await ready
