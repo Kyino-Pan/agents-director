@@ -1,7 +1,8 @@
 import { DatabaseSync } from 'node:sqlite'
-import { readFile, stat, open } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join, isAbsolute } from 'node:path'
+import { join, isAbsolute, resolve, extname } from 'node:path'
+import { sourceFilePath, openSourceFile, readSourceText } from './source-files.mjs'
 import { WINDOW_MS, timestamp } from './activity-store.mjs'
 import { readProjectCatalog } from './project-catalog-reader.mjs'
 import { readOrchestration } from './orchestration-reader.mjs'
@@ -317,10 +318,11 @@ export class OrcaLogReader {
   }
 
   database(path) {
+    const canonical = sourceFilePath(path, this.directories)
     let db = this.databases.get(path)
     if (!db) {
-      db = new DatabaseSync(path, { readOnly: true, timeout: 250 })
-      db.exec('PRAGMA query_only = ON')
+      db = new DatabaseSync(canonical, { readOnly: true, timeout: 250, allowExtension: false })
+      db.exec('PRAGMA query_only = ON; PRAGMA trusted_schema = OFF')
       this.databases.set(path, db)
     }
     return db
@@ -337,17 +339,15 @@ export class OrcaLogReader {
       catalogs.set(directory, tabWorkspaces)
       const statusPath = join(directory, 'agent-hooks', 'last-status.json')
       await this.scanSource(statusPath, async () => {
-        const contents = await readFile(statusPath, 'utf8')
-        if (contents.length > MAX_LOG_BYTES) {
-          throw new Error('Status cache exceeds the 32 MiB reader limit')
-        }
+        const contents = await readSourceText(statusPath, [directory], MAX_LOG_BYTES)
         const status = JSON.parse(contents)
         for (const [pane, row] of Object.entries(status.entries ?? {})) {
           const transcript = importStatusRow(this.store, pane, row, now)
           if (transcript) {
             this.transcripts.set(transcript.path, {
               ...this.transcripts.get(transcript.path),
-              ...transcript
+              ...transcript,
+              directory
             })
           }
         }
@@ -370,6 +370,7 @@ export class OrcaLogReader {
 
   async scanSource(path, scan) {
     try {
+      if (path.endsWith('.db')) sourceFilePath(path, this.directories)
       const info = await stat(path)
       if (path.endsWith('.db')) {
         const fingerprint = `${info.dev}:${info.ino}`
@@ -492,59 +493,74 @@ export class OrcaLogReader {
   }
 
   async transcript(entry, now) {
-    const info = await stat(entry.path)
-    if (info.mtimeMs < now - WINDOW_MS) {
-      return `${entry.provider} transcript last modified before the 7-day window`
+    if (!['codex', 'claude'].includes(entry.provider) || extname(entry.path) !== '.jsonl') {
+      throw new Error('Only Codex and Claude JSONL activity transcripts are supported.')
     }
-    if (entry.ino !== info.ino || (entry.offset ?? 0) > info.size) {
-      entry.offset = 0
-      entry.tail = Buffer.alloc(0)
+    const roots = [entry.directory]
+    if (resolve(entry.directory) === resolve(defaultDataDirectory())) {
+      const home =
+        entry.provider === 'codex'
+          ? process.env.CODEX_HOME || join(homedir(), '.codex')
+          : process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
+      roots.push(
+        ...(entry.provider === 'codex' ? ['sessions', 'archived_sessions'] : ['projects']).map(
+          (part) => join(home, part)
+        )
+      )
     }
-    const from = entry.offset ?? 0
-    const start = Math.max(from, info.size - MAX_LOG_BYTES)
-    const file = await open(entry.path, 'r')
-    let bytes
+    const file = await openSourceFile(entry.path, roots)
     try {
+      const info = await file.stat()
+      if (info.mtimeMs < now - WINDOW_MS) {
+        return `${entry.provider} transcript last modified before the 7-day window`
+      }
+      if (entry.ino !== info.ino || (entry.offset ?? 0) > info.size) {
+        entry.offset = 0
+        entry.tail = Buffer.alloc(0)
+      }
+      const from = entry.offset ?? 0
+      const start = Math.max(from, info.size - MAX_LOG_BYTES)
+      let bytes
       bytes = Buffer.alloc(Math.min(MAX_LOG_BYTES, info.size - start))
       const result = await file.read(bytes, 0, bytes.length, start)
       bytes = bytes.subarray(0, result.bytesRead)
+      let contents = Buffer.concat([
+        start === from ? (entry.tail ?? Buffer.alloc(0)) : Buffer.alloc(0),
+        bytes
+      ])
+      if (start > from) {
+        contents = contents.subarray(contents.indexOf(10) + 1)
+        this.store.limited = true
+      }
+      const end = contents.lastIndexOf(10)
+      const lines =
+        end !== -1
+          ? contents
+              .subarray(0, end + 1)
+              .toString('utf8')
+              .split('\n')
+          : []
+      entry.tail = contents.subarray(end + 1)
+      if (entry.tail.length > 1024 * 1024) {
+        entry.tail = Buffer.alloc(0)
+        this.store.limited = true
+      }
+      for (const line of lines) {
+        const row = parsed(line)
+        if (!row) {
+          continue
+        }
+        const at = timestamp(row.timestamp ?? row.ts)
+        if (at !== null && at >= now - WINDOW_MS) {
+          importTranscriptRow(this.store, entry.id, entry.provider, row, entry.path)
+        }
+      }
+      entry.offset = start + bytes.length
+      entry.ino = info.ino
+      return `${entry.provider} transcript; ${bytes.length} new bytes read`
     } finally {
       await file.close()
     }
-    let contents = Buffer.concat([
-      start === from ? (entry.tail ?? Buffer.alloc(0)) : Buffer.alloc(0),
-      bytes
-    ])
-    if (start > from) {
-      contents = contents.subarray(contents.indexOf(10) + 1)
-      this.store.limited = true
-    }
-    const end = contents.lastIndexOf(10)
-    const lines =
-      end !== -1
-        ? contents
-            .subarray(0, end + 1)
-            .toString('utf8')
-            .split('\n')
-        : []
-    entry.tail = contents.subarray(end + 1)
-    if (entry.tail.length > 1024 * 1024) {
-      entry.tail = Buffer.alloc(0)
-      this.store.limited = true
-    }
-    for (const line of lines) {
-      const row = parsed(line)
-      if (!row) {
-        continue
-      }
-      const at = timestamp(row.timestamp ?? row.ts)
-      if (at !== null && at >= now - WINDOW_MS) {
-        importTranscriptRow(this.store, entry.id, entry.provider, row, entry.path)
-      }
-    }
-    entry.offset = start + bytes.length
-    entry.ino = info.ino
-    return `${entry.provider} transcript; ${bytes.length} new bytes read`
   }
 
   close() {

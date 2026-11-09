@@ -73,6 +73,12 @@ Both the desktop acknowledgement and selected tab must match; a saved selection 
 proof of navigation. These calls run only on a navigation gesture, never during refresh.
 No prompt is sent and no new Chat is created.
 
+The worker remains a full-access Node process; its manifest capabilities are not an OS
+sandbox. See [access boundaries](security.md) for the enforced application checks and limits.
+Imported transcripts must be inside their selected data directory. The default local source
+also accepts Codex `sessions`/`archived_sessions` and Claude `projects` under their configuration
+directories. References outside those roots appear as unavailable in Data sources.
+
 Coordinator project membership also uses saved terminal tabs and terminal-close records from
 the selected profile, so closing a terminal or losing its status cache does not lose a known
 project. Conflicting tab ownership stays unresolved. These records establish placement only,

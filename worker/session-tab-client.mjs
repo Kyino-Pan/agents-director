@@ -1,25 +1,27 @@
-import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createConnection } from 'node:net'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
+import { readSourceText } from './source-files.mjs'
+import { runtimeEndpoint, validateRuntimeSocket } from './runtime-endpoint.mjs'
 
 export async function createSessionTabClient(directory) {
-  const metadata = JSON.parse(await readFile(join(directory, 'orca-runtime.json'), 'utf8'))
-  const transport = (metadata.transports ?? [metadata.transport]).find((entry) =>
-    ['unix', 'named-pipe'].includes(entry?.kind)
+  const metadata = JSON.parse(
+    await readSourceText(join(directory, 'orca-runtime.json'), [directory], 64 * 1024, {
+      privateFile: true
+    })
   )
-  if (!transport?.endpoint || !metadata.authToken || !metadata.runtimeId) {
-    throw new Error('Orca session navigation is unavailable. Check that Orca is running.')
-  }
-  return (method, params) => {
+  const endpoint = runtimeEndpoint(metadata, directory)
+  return async (method, params) => {
     if (!['session.tabs.list', 'session.tabs.activate', 'terminal.reveal'].includes(method)) {
       throw new Error('Unsupported session navigation operation.')
     }
+    await validateRuntimeSocket(endpoint, directory)
     return new Promise((resolve, reject) => {
       const id = randomUUID()
-      const socket = createConnection(transport.endpoint)
+      const socket = createConnection(endpoint)
       let buffer = ''
+      let receivedBytes = 0
       let settled = false
       const finish = (error, result) => {
         if (settled) return
@@ -42,7 +44,8 @@ export async function createSessionTabClient(directory) {
       )
       socket.on('data', (chunk) => {
         buffer += chunk
-        if (Buffer.byteLength(buffer) > 1024 * 1024) {
+        receivedBytes += Buffer.byteLength(chunk)
+        if (receivedBytes > 1024 * 1024) {
           finish(new Error('Orca session inventory exceeds the navigation limit.'))
           return
         }
@@ -59,10 +62,7 @@ export async function createSessionTabClient(directory) {
             return
           }
           if (reply?._keepalive) continue
-          if (
-            reply?.id !== id ||
-            (reply._meta?.runtimeId && reply._meta.runtimeId !== metadata.runtimeId)
-          ) {
+          if (reply?.id !== id || reply._meta?.runtimeId !== metadata.runtimeId) {
             finish(new Error('Orca changed while resolving this session. Try again.'))
           } else if (reply.ok !== true) {
             finish(

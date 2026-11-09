@@ -1,5 +1,5 @@
-import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { readSourceText } from './source-files.mjs'
 
 const clean = (value) =>
   typeof value === 'string' ? value.trim().slice(0, 2048) || undefined : undefined
@@ -40,7 +40,9 @@ export async function readProjectCatalog(reader, directory) {
   const tabWorkspaces = new Map()
   let profileDirectory = directory
   try {
-    const index = parsed(await readFile(join(directory, 'orca-profile-index.json'), 'utf8'))
+    const index = parsed(
+      await readSourceText(join(directory, 'orca-profile-index.json'), [directory], 64 * 1024)
+    )
     const id = clean(index?.activeProfileId)
     if (id && /^[a-zA-Z0-9_-]+$/.test(id)) {
       profileDirectory = join(directory, 'profiles', id)

@@ -10,16 +10,22 @@ import { createTerminalNavigator } from './terminal-navigation.mjs'
 import { ActivityStore } from './activity-store.mjs'
 import { defaultDataDirectory } from './orca-log-reader.mjs'
 
+let runtimeNumber = 0
 async function runtime(context, handler) {
   const directory = await mkdtemp(join(tmpdir(), 'chat-nav-'))
+  const runtimeId = `r${(++runtimeNumber).toString(36).padStart(3, '0')}-${randomUUID()}`
+  const suffix = runtimeId.slice(0, 4)
   const endpoint =
-    process.platform === 'win32' ? `\\\\.\\pipe\\chat-nav-${randomUUID()}` : join(directory, 'rpc')
+    process.platform === 'win32'
+      ? `\\\\.\\pipe\\orca-${process.pid}-${suffix}`
+      : join(directory, `o-${process.pid}-${suffix}.sock`)
   const metadata = {
-    runtimeId: 'runtime',
+    pid: process.pid,
+    runtimeId,
     authToken: randomUUID(),
     transports: [{ kind: process.platform === 'win32' ? 'named-pipe' : 'unix', endpoint }]
   }
-  await writeFile(join(directory, 'orca-runtime.json'), JSON.stringify(metadata))
+  await writeFile(join(directory, 'orca-runtime.json'), JSON.stringify(metadata), { mode: 0o600 })
   const requests = []
   const server = createServer((socket) => {
     socket.setEncoding('utf8')
@@ -184,6 +190,7 @@ test('session runtime failures and replacement hosts cannot report successful na
     null,
     { ok: false, error: { code: 'permission_denied' } },
     { id: 'other' },
+    { _meta: {} },
     { _meta: { runtimeId: 'replacement' } }
   ]) {
     const { directory } = await runtime(context, () => response)

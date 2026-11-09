@@ -1,27 +1,8 @@
-import { access } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
 import { runProcess } from '@orca/process-host'
+import { terminalCliSpec } from './terminal-cli-policy.mjs'
 
 export async function runTerminalCli(args) {
-  const entry = resolve(dirname(process.argv[1] || ''), '..', 'cli', 'index.js')
-  let program = process.platform === 'linux' ? 'orca-ide' : 'orca'
-  let prefix = []
-  try {
-    await access(entry)
-    program = process.execPath
-    prefix = [entry]
-  } catch {
-    if (process.platform === 'win32') {
-      throw new Error('Terminal navigation requires the Orca desktop plugin worker.')
-    }
-  }
-  const result = await runProcess({
-    program,
-    args: [...prefix, 'terminal', ...args, '--json'],
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-    timeoutMs: 8000,
-    maxOutputBytes: 256 * 1024
-  })
+  const result = await runProcess(terminalCliSpec(args, process.argv[1], process.execPath))
   if (result.timedOut) {
     throw new Error('Terminal navigation timed out. Try again.')
   }

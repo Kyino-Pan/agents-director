@@ -1,7 +1,3 @@
-// worker/terminal-cli.mjs
-import { access } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-
 // vendor/process-host/run-process.ts
 import {
   spawn as nodeSpawn3,
@@ -1071,27 +1067,80 @@ function terminate(child, signal) {
   }
 }
 
-// worker/terminal-cli.mjs
-async function runTerminalCli(args) {
-  const entry = resolve(dirname(process.argv[1] || ""), "..", "cli", "index.js");
-  let program = process.platform === "linux" ? "orca-ide" : "orca";
-  let prefix = [];
-  try {
-    await access(entry);
-    program = process.execPath;
-    prefix = [entry];
-  } catch {
-    if (process.platform === "win32") {
-      throw new Error("Terminal navigation requires the Orca desktop plugin worker.");
-    }
+// worker/terminal-cli-policy.mjs
+import { basename, dirname, isAbsolute as isAbsolute2, resolve, join } from "node:path";
+
+// worker/source-files.mjs
+import { constants as constants2, realpathSync, statSync as statSync2 } from "node:fs";
+import { isAbsolute, relative } from "node:path";
+function sourceFilePath(path, roots) {
+  if (typeof path !== "string" || !isAbsolute(path) || path.includes("\0")) {
+    throw new Error("Source path must be an absolute local file path.");
   }
-  const result = await runProcess({
-    program,
-    args: [...prefix, "terminal", ...args, "--json"],
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+  const canonical = realpathSync(path);
+  const contained = roots.some((root) => {
+    try {
+      const rest = relative(realpathSync(root), canonical);
+      return rest !== "" && rest !== ".." && !rest.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) && !isAbsolute(rest);
+    } catch {
+      return false;
+    }
+  });
+  if (!contained) throw new Error("Source file is outside the permitted data directories.");
+  if (!statSync2(canonical).isFile()) throw new Error("Source must be a regular file.");
+  return canonical;
+}
+
+// worker/terminal-cli-policy.mjs
+function terminalCliSpec(args, workerEntry, executable, environment = process.env, platform = process.platform) {
+  if (!Array.isArray(args) || args.length !== 3 || !["show", "switch", "list"].includes(args[0]) || args[1] !== (args[0] === "list" ? "--worktree" : "--terminal") || typeof args[2] !== "string" || args[2].length > 2048 || [...args[2]].some(
+    (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127
+  ) || !(args[0] === "list" ? /^id:.+/.test(args[2]) : /^term_[a-zA-Z0-9_-]+$/.test(args[2]))) {
+    throw new Error("Unsupported terminal navigation arguments.");
+  }
+  if (!workerEntry || !isAbsolute2(workerEntry) || basename(workerEntry) !== "plugin-host-entry.js" || !isAbsolute2(executable)) {
+    throw new Error("Terminal navigation requires the Orca desktop plugin worker.");
+  }
+  const root = resolve(dirname(workerEntry), "..");
+  const entry = sourceFilePath(join(root, "cli", "index.js"), [root]);
+  const allowed = /* @__PURE__ */ new Set([
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "XDG_CONFIG_HOME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TZ",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "WINDIR"
+  ]);
+  const env = Object.fromEntries(
+    Object.entries(environment).filter(
+      ([key, value]) => typeof value === "string" && allowed.has(platform === "win32" ? key.toUpperCase() : key)
+    )
+  );
+  if (platform === "win32" && !Object.keys(env).some((key) => key.toUpperCase() === "APPDATA") && env.USERPROFILE) {
+    env.APPDATA = join(env.USERPROFILE, "AppData", "Roaming");
+  }
+  env.ELECTRON_RUN_AS_NODE = "1";
+  return {
+    program: executable,
+    args: [entry, "terminal", ...args, "--json"],
+    env,
     timeoutMs: 8e3,
     maxOutputBytes: 256 * 1024
-  });
+  };
+}
+
+// worker/terminal-cli.mjs
+async function runTerminalCli(args) {
+  const result = await runProcess(terminalCliSpec(args, process.argv[1], process.execPath));
   if (result.timedOut) {
     throw new Error("Terminal navigation timed out. Try again.");
   }
