@@ -130,6 +130,15 @@ test('closed session resumes only its saved identity in its original workspace',
   assert.equal(mutations(f).length, 1)
 })
 
+test('a successful verified resume settles its fence before a later close and resume', async () => {
+  const f = fixture({ tabs: [], terminals: [] })
+  assert.deepEqual(await f.navigate({ agentId: 'agent' }), { navigated: true })
+  f.state.tabs = []
+  f.state.terminals = []
+  assert.deepEqual(await f.navigate({ agentId: 'agent' }), { navigated: true })
+  assert.equal(mutations(f).length, 2)
+})
+
 test('a reused historical pane never navigates to its successor, and resumes into a new terminal', async () => {
   const f = fixture()
   f.state.tabs[0].agentStatus.providerSession.id = 'successor'
@@ -238,6 +247,48 @@ test('uncertain resume can recover by navigating a verified owner without relaun
   await assert.rejects(f.navigate({ agentId: 'agent' }), /reply lost/)
   assert.deepEqual(await f.navigate({ agentId: 'agent' }), { navigated: true })
   assert.equal(mutations(f).length, 1)
+  f.state.tabs = []
+  f.state.terminals = []
+  f.state.resume = undefined
+  assert.deepEqual(await f.navigate({ agentId: 'agent' }), { navigated: true })
+  assert.equal(mutations(f).length, 2)
+})
+
+test('only the exact live owner settles uncertainty, independently of desktop focus', async () => {
+  const f = fixture({
+    tabs: [],
+    terminals: [],
+    resume: () => {
+      throw new Error('reply lost')
+    }
+  })
+  await assert.rejects(f.navigate({ agentId: 'agent' }), /reply lost/)
+  f.state.tabs = [
+    {
+      ...tab,
+      agentStatus: { ...tab.agentStatus, providerSession: { key: 'session_id', id: 'successor' } }
+    }
+  ]
+  f.state.terminals = [terminal]
+  await assert.rejects(f.navigate({ agentId: 'agent' }), /already requested/)
+  f.state.tabs = [tab]
+  f.state.terminals = [{ ...terminal, executionHostId: 'ssh:replacement' }]
+  await assert.rejects(f.navigate({ agentId: 'agent' }), /execution host no longer matches/)
+  f.state.tabs = []
+  f.state.terminals = []
+  await assert.rejects(f.navigate({ agentId: 'agent' }), /already requested/)
+  assert.equal(mutations(f).length, 1)
+
+  f.state.tabs = [tab]
+  f.state.terminals = [terminal]
+  f.state.navigated = false
+  await assert.rejects(f.navigate({ agentId: 'agent' }), /could not show/)
+  f.state.tabs = []
+  f.state.terminals = []
+  f.state.navigated = true
+  f.state.resume = undefined
+  assert.deepEqual(await f.navigate({ agentId: 'agent' }), { navigated: true })
+  assert.equal(mutations(f).length, 2)
 })
 
 test('unconfirmed switch is retryable without resuming', async () => {

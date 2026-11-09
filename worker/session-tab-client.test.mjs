@@ -321,13 +321,21 @@ test('a lost Chat reopen reply is not repeated and can recover through the exist
   store.agent('chat', savedChat)
   let reopened = false
   let reveals = 0
+  let loseReply = true
   const request = async (method, params) => {
     if (method === 'status.get') return { capabilities, graphStatus: 'ready' }
     if (method === 'worktree.show')
       return { worktree: { id: inventory.worktree, hostId: 'local', path: '/original' } }
     if (method === 'agentSession.reveal') {
       reveals++
-      throw new Error('reply lost')
+      if (loseReply) throw new Error('reply lost')
+      reopened = true
+      return {
+        ok: true,
+        sessionId: chat.sessionId,
+        workspaceId: inventory.worktree,
+        agent: 'codex'
+      }
     }
     if (method === 'terminal.reveal') return { reveal: { ...params, navigated: true } }
     return { ...inventory, tabs: reopened ? [chat] : [], activeTabId: chat.id }
@@ -346,6 +354,99 @@ test('a lost Chat reopen reply is not repeated and can recover through the exist
   reopened = true
   assert.deepEqual(await navigate({ agentId: 'chat' }), { navigated: true })
   assert.equal(reveals, 1)
+  reopened = false
+  loseReply = false
+  assert.deepEqual(await navigate({ agentId: 'chat' }), { navigated: true })
+  assert.equal(reveals, 2)
+})
+
+function chatNavigationFixture() {
+  const store = new ActivityStore()
+  store.agent('chat', savedChat)
+  const state = { tabs: [], workspace: inventory.worktree, reveals: 0, navigated: true }
+  const request = async (method, params) => {
+    if (method === 'status.get') return { capabilities, graphStatus: 'ready' }
+    if (method === 'worktree.show')
+      return { worktree: { id: inventory.worktree, hostId: 'local', path: '/original' } }
+    if (method === 'agentSession.reveal') {
+      state.reveals++
+      await state.reopen?.()
+      state.tabs = [chat]
+      return {
+        ok: true,
+        sessionId: chat.sessionId,
+        workspaceId: inventory.worktree,
+        agent: 'codex'
+      }
+    }
+    if (method === 'terminal.reveal') return { reveal: { ...params, navigated: state.navigated } }
+    return { ...inventory, worktree: state.workspace, tabs: state.tabs, activeTabId: chat.id }
+  }
+  const navigate = createTerminalNavigator(
+    store,
+    [defaultDataDirectory()],
+    undefined,
+    undefined,
+    async () => request,
+    checkDirectory
+  )
+  return { state, navigate: () => navigate({ agentId: 'chat' }) }
+}
+
+test('a successful native Chat reopen settles its fence before a later close and reopen', async () => {
+  const f = chatNavigationFixture()
+  assert.deepEqual(await f.navigate(), { navigated: true })
+  f.state.tabs = []
+  assert.deepEqual(await f.navigate(), { navigated: true })
+  assert.equal(f.state.reveals, 2)
+})
+
+test('only the exact Chat in its workspace settles uncertainty, independently of desktop reveal', async () => {
+  const f = chatNavigationFixture()
+  f.state.reopen = () => {
+    throw new Error('reply lost')
+  }
+  await assert.rejects(f.navigate(), /reply lost/)
+  f.state.tabs = [{ ...chat, sessionId: 'successor' }]
+  await assert.rejects(f.navigate(), /already requested/)
+  f.state.tabs = [chat]
+  f.state.workspace = 'folder:replacement'
+  await assert.rejects(f.navigate(), /no longer open/)
+  f.state.tabs = []
+  f.state.workspace = inventory.worktree
+  await assert.rejects(f.navigate(), /already requested/)
+  assert.equal(f.state.reveals, 1)
+
+  f.state.tabs = [chat]
+  f.state.navigated = false
+  await assert.rejects(f.navigate(), /could not show this Chat workspace/)
+  f.state.tabs = []
+  f.state.navigated = true
+  f.state.reopen = undefined
+  assert.deepEqual(await f.navigate(), { navigated: true })
+  assert.equal(f.state.reveals, 2)
+})
+
+test('an in-flight native Chat reopen still blocks duplicate navigation', async () => {
+  const f = chatNavigationFixture()
+  let release
+  let started
+  const requested = new Promise((resolve) => {
+    started = resolve
+  })
+  f.state.reopen = () => {
+    started()
+    return new Promise((resolve) => {
+      release = resolve
+    })
+  }
+  const first = f.navigate()
+  await requested
+  await assert.rejects(f.navigate(), /already in progress/)
+  assert.equal(f.state.reveals, 1)
+  release()
+  assert.deepEqual(await first, { navigated: true })
+  assert.equal(f.state.reveals, 1)
 })
 
 test('resume RPC allowlist admits saved identity only and rejects commands, prompts and extra fields', async (context) => {

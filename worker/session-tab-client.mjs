@@ -144,7 +144,8 @@ export async function navigateSessionTab(
   directory,
   connect = createSessionTabClient,
   beforeResume = () => {},
-  checkDirectory
+  checkDirectory,
+  ownerObserved = () => {}
 ) {
   if (!agent.workspace || !agent.sessionId) {
     throw new Error('No workspace was recorded for this Chat.')
@@ -183,6 +184,9 @@ export async function navigateSessionTab(
       )
     }
   }
+  // An exact saved Chat in its workspace settles an earlier uncertain reopen;
+  // desktop visibility is a separate confirmation and may still fail below.
+  ownerObserved()
   // Tab activation alone cannot reveal an inactive Chat workspace in Orca 1.4.248.
   const { reveal } = await request('terminal.reveal', {
     worktreeId: workspace,

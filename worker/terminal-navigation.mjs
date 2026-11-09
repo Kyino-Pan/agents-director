@@ -69,8 +69,8 @@ export function createTerminalNavigator(
   checkDirectory
 ) {
   let pending = false
-  // Keep uncertain mutations across clicks and panel instances. The host additionally
-  // deduplicates ensureAgentSession by identity; never retry as a fresh launch.
+  // Keep uncertain mutations across clicks and panel instances until the exact live
+  // conversation owner is verified. The host additionally deduplicates by identity.
   const resumeAttempts = new Set()
   return async (input) => {
     if (pending) {
@@ -96,6 +96,7 @@ export function createTerminalNavigator(
       }
       resumeAttempts.add(identity)
     }
+    const ownerObserved = () => resumeAttempts.delete(identity)
     pending = true
     try {
       if (
@@ -104,7 +105,14 @@ export function createTerminalNavigator(
           !agent.terminalHandle ||
           agent.paneKey?.startsWith('structured-agent-session-'))
       ) {
-        return await navigateChat(agent, directories[0], connect, beforeResume, checkDirectory)
+        return await navigateChat(
+          agent,
+          directories[0],
+          connect,
+          beforeResume,
+          checkDirectory,
+          ownerObserved
+        )
       }
       if (!agent.workspace || !agent.provider || !agent.providerSessionId) {
         throw new Error(
@@ -196,6 +204,8 @@ export function createTerminalNavigator(
       ) {
         throw new Error('The terminal no longer belongs to this conversation.')
       }
+      // Ownership settles the resume even if desktop focus subsequently fails.
+      ownerObserved()
       const { focus } = await command(['switch', '--terminal', terminal.handle])
       if (!focus?.navigated) {
         throw new Error('Orca could not show this terminal in the current desktop.')

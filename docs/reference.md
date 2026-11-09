@@ -96,12 +96,14 @@ both the acknowledgement and selected session must match. These RPCs use the loc
 socket or Windows named pipe; ephemeral runtime credentials stay in worker memory.
 
 Concurrent navigation requests are blocked across the worker's panels. Once a resume mutation
-is sent, another click can navigate a subsequently verified owner, but cannot issue another
-resume for that identity during this worker lifetime. This also covers timeouts, lost replies,
-refusals and unconfirmed launch ownership: inspect the original workspace in Orca before any
-manual recovery. Orca's CLI resume claim additionally prevents duplicate conversation owners.
-Restarting the worker clears the local attempt guard; it does not establish that an uncertain
-process exited. Navigation/resume calls run only on the explicit gesture, never on refresh.
+is sent, another click cannot issue another resume until the exact live terminal owner or
+saved Chat tab is verified in its recorded workspace. This settles the attempt even if desktop
+focus subsequently fails, and allows a later close-and-resume lifecycle. Timeouts, lost replies,
+refusals and unconfirmed ownership stay fenced while no exact owner is observed; inspect the
+original workspace in Orca before manual recovery. Orca's CLI resume claim additionally prevents
+duplicate conversation owners. Restarting the worker clears the local attempt guard; it does
+not establish that an uncertain process exited. Navigation/resume calls run only on the explicit
+gesture, never on refresh.
 
 The worker remains a full-access Node process; its manifest capabilities are not an OS
 sandbox. See [access boundaries](security.md) for the enforced application checks and limits.
