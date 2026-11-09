@@ -79,7 +79,7 @@ test('context actions and platform click navigate the selected agent, preserving
   assert.equal(await page.locator('#detail').isVisible(), true)
   assert.equal(await page.evaluate(() => window.navigationRequest), undefined)
   await lane.click({ button: 'right' })
-  await page.getByRole('menuitem', { name: 'Go to terminal' }).click()
+  await page.getByRole('menuitem', { name: 'Open or resume terminal' }).click()
   assert.deepEqual(await page.evaluate(() => window.navigationRequest), { agentId })
   await page.evaluate(() => {
     window.navigationRequest = null
@@ -99,7 +99,10 @@ test('context actions and platform click navigate the selected agent, preserving
   await page.keyboard.press('Escape')
   assert.equal(await page.locator('#sources-dialog').isVisible(), false)
   await page.locator(`.lane[data-agent="${snapshot.agents[1].id}"]`).click({ button: 'right' })
-  assert.equal(await page.getByRole('menuitem', { name: 'Go to terminal' }).isDisabled(), true)
+  assert.equal(
+    await page.getByRole('menuitem', { name: 'Open or resume terminal' }).isEnabled(),
+    true
+  )
   assert.deepEqual(errors, [])
   await page.close()
 })
@@ -119,7 +122,7 @@ test('native Chats without terminal handles or pane keys remain navigable from n
   try {
     const lane = page.locator(`.lane[data-agent="${agent.id}"]`)
     await lane.click({ button: 'right' })
-    const action = page.getByRole('menuitem', { name: 'Go to Chat', exact: true })
+    const action = page.getByRole('menuitem', { name: 'Open or resume Chat', exact: true })
     assert.equal(await action.isEnabled(), true)
     await action.click()
     assert.deepEqual(await page.evaluate(() => window.navigationRequest), { agentId: agent.id })
@@ -603,4 +606,41 @@ test('only agents with evidence in the selected time window are visible', async 
   assert.deepEqual(await page.locator('.lane-name').allTextContents(), ['Agent current-work'])
   assert.deepEqual(errors, [])
   await page.close()
+})
+
+test('closed provider-only identity remains actionable and internal subagents explain why resume is unavailable', async () => {
+  const data = structuredClone(snapshot)
+  const agent = data.agents[0]
+  agent.providerSessionId = 'closed-conversation'
+  agent.workspace = 'folder:original'
+  delete agent.sessionId
+  delete agent.terminalHandle
+  delete agent.paneKey
+  const { page, errors } = await pageFor({ data })
+  try {
+    const lane = page.locator(`.lane[data-agent="${agent.id}"]`)
+    await lane.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Open or resume terminal' }).click()
+    assert.deepEqual(await page.evaluate(() => window.navigationRequest), { agentId: agent.id })
+    await page.evaluate(() => {
+      const agent = window.testSnapshot.agents[0]
+      delete agent.providerSessionId
+      delete agent.workspace
+      agent.parentId = 'parent'
+      window.navigationRequest = null
+      window.notifyActivity()
+    })
+    await lane.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Open or resume terminal' }).click()
+    await page
+      .getByText(
+        'This internal subagent has no supported standalone resume identity. Open its parent conversation.',
+        { exact: true }
+      )
+      .waitFor()
+    assert.equal(await page.evaluate(() => window.navigationRequest), null)
+    assert.deepEqual(errors, [])
+  } finally {
+    await page.close()
+  }
 })

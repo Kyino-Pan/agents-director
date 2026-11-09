@@ -17,7 +17,9 @@ It is not an official Orca product.
 
 Review and approve the access request Orca displays. The worker reads
 local source logs using Node, with private storage, settings and `agent:read` access. No terminal
-input, notifications, secrets or network access are requested through the host API.
+input, notifications, secrets or network access are requested through the host API. An explicit
+Open or resume action can start a saved CLI conversation through the trusted worker runtime;
+it can also reopen an existing saved Chat tab.
 
 - **Full overview:** tab-bar **+ → Agents Director**, or choose the new-file command **Agents Director**.
   This opens an `.orca-activity` document in the main editor area, where the view can be split.
@@ -42,10 +44,11 @@ input, notifications, secrets or network access are requested through the host A
   Panning into an empty interval keeps the timeline and scroll area available, with an in-chart
   message, so you can scroll back without resetting the window.
 - **Data sources:** right-click the view → **Data sources**. The coverage details open on demand.
-- **Go to Chat / terminal:** right-click an agent lane or segment → **Go to Chat** for native
-  sessions or **Go to terminal** for CLI agents, or Command-click
+- **Open or resume Chat / terminal:** right-click an agent lane or segment → **Open or resume Chat** for native
+  sessions or **Open or resume terminal** for CLI agents, or Command-click
   on macOS / Ctrl-click on Windows and Linux. Ordinary clicks still inspect activity. Shift+F10
-  opens the same menu from the keyboard. Closed Chats and disconnected terminals show a reason.
+  opens the same menu from the keyboard. A current owner is preferred; eligible closed conversations reopen in their original workspace.
+  Unverified exits, missing identities and unsupported routes show a reason without starting anything.
 - **Terminal memory:** the name's right edge shows current terminal-and-child-process memory,
   sampled at most every 30 seconds while the view requests updates. Units are MiB/GiB; hover
   for the metric and sample time. macOS uses footprint, Linux RSS and Windows working set,
@@ -65,21 +68,40 @@ known name. Unnamed history keeps its provider/ID fallback. Canonical IDs stay s
 change; available Orca/provider session IDs, pane keys, terminal handles and orchestration IDs
 remain attached for inspection, search and terminal navigation.
 
-Host API 1.2 has no terminal navigation method, so the trusted worker uses the desktop's own
-CLI through the shared process launcher. It checks terminal identity before `terminal switch`,
-never sends terminal input, and only reports success when Orca confirms navigation. A stale
-handle can be refreshed by exact workspace/pane only while the recorded conversation still
-owns that pane. Navigation is disabled for imported data directories and browser previews;
-those cannot safely identify a terminal on the current desktop. Host-registered remote
-terminals follow the same CLI path; no new SSH connection is made by this plugin.
-Native Chats have no terminal handle. Their navigation uses Orca's local session-tab RPC over
-its Unix socket or Windows named pipe, with the host's ephemeral runtime credentials kept in
-memory. It finds the exact session in its recorded workspace, uses `terminal.reveal` to reveal
-that workspace with a desktop acknowledgement, then requests host-only Chat tab activation.
-This two-step route is needed because Orca 1.4.248 ignores Chat tab focus across workspaces.
-Both the desktop acknowledgement and selected tab must match; a saved selection alone is not
-proof of navigation. These calls run only on a navigation gesture, never during refresh.
-No prompt is sent and no new Chat is created.
+Host API 1.2 has no terminal navigation or resume method, so the trusted worker uses the
+desktop's bundled CLI and authenticated local runtime socket. Before `terminal switch`, it
+joins the live workspace tab's provider/session identity to a fresh terminal inventory, checks
+the handle and checks conversation ownership again. Historical pane aliases alone never
+prove ownership: a reused pane cannot open its successor by mistake. Navigation is disabled
+for imported data directories and browser previews.
+
+A closed local Codex or Claude CLI conversation with an explicitly recorded provider session,
+workspace and local execution host can use `terminal.ensureAgentSession` with `resumeOrigin:
+saved`. Orca owns resume command construction and conversation claims; the plugin sends no
+shell command, fresh-agent request or prompt. The original workspace must still resolve on
+the original host and its directory must exist. A missing or incomplete inventory, ambiguous
+owner or disconnected process is refused rather than treated as closed. Host capability checks
+must advertise both host authority and saved-resume support. Remote CLI resume is refused;
+Windows CLI resume is refused because hook records do not establish the original native/WSL
+route. Existing verifiable terminal navigation still works on those platforms and hosts.
+Internal model subagents without a separate recorded standalone identity cannot be resumed.
+Other CLI providers currently show an unsupported-provider reason.
+
+Native Chat remains a Chat. An open tab is found by exact Orca session ID. A closed Chat uses
+`agentSession.reveal` to republish that same saved conversation, after verifying its recorded
+local execution location and the original workspace. It never creates a replacement Chat or
+terminal. Remote/WSL or unknown Chat resume routes are refused. Opening either Chat path then
+uses `terminal.reveal` with a desktop acknowledgement and host-only `session.tabs.activate`;
+both the acknowledgement and selected session must match. These RPCs use the local Unix
+socket or Windows named pipe; ephemeral runtime credentials stay in worker memory.
+
+Concurrent navigation requests are blocked across the worker's panels. Once a resume mutation
+is sent, another click can navigate a subsequently verified owner, but cannot issue another
+resume for that identity during this worker lifetime. This also covers timeouts, lost replies,
+refusals and unconfirmed launch ownership: inspect the original workspace in Orca before any
+manual recovery. Orca's CLI resume claim additionally prevents duplicate conversation owners.
+Restarting the worker clears the local attempt guard; it does not establish that an uncertain
+process exited. Navigation/resume calls run only on the explicit gesture, never on refresh.
 
 The worker remains a full-access Node process; its manifest capabilities are not an OS
 sandbox. See [access boundaries](security.md) for the enforced application checks and limits.
@@ -182,3 +204,6 @@ animation, persistence, empty-range recovery, light/dark rendering and narrow la
 `orca plugin check` validates HTML panels but does not render them; headless browser tests
 provide the rendered checks. Native plugin checks have been performed on macOS with Orca
 1.4.246. Windows and Linux native app behavior has not yet been verified.
+Resume capabilities and strict RPC parameter contracts were checked against installed Orca
+1.4.248. Resume mutations are tested with stubs and private fake runtimes; validation does not
+resume real user conversations or reveal desktop windows.

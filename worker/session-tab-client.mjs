@@ -4,6 +4,46 @@ import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { readSourceText } from './source-files.mjs'
 import { runtimeEndpoint, validateRuntimeSocket } from './runtime-endpoint.mjs'
+import { prepareResume } from './session-resume.mjs'
+
+const keysAre = (value, keys) =>
+  value &&
+  Object.keys(value).length === keys.length &&
+  keys.every((key) => Object.hasOwn(value, key))
+const identity = (value) => typeof value === 'string' && /^[A-Za-z0-9_-]{1,512}$/.test(value)
+
+function validateResumeRequest(method, params) {
+  if (method === 'agentSession.reveal') {
+    return keysAre(params, ['sessionId']) && identity(params.sessionId)
+  }
+  if (method === 'terminal.ensureAgentSession') {
+    return (
+      keysAre(params, [
+        'kind',
+        'resumeOrigin',
+        'worktree',
+        'agent',
+        'providerSession',
+        'presentation'
+      ]) &&
+      params.kind === 'explicit' &&
+      params.resumeOrigin === 'saved' &&
+      typeof params.worktree === 'string' &&
+      params.worktree.startsWith('id:') &&
+      params.worktree.length > 3 &&
+      params.worktree.length <= 2051 &&
+      [...params.worktree].every(
+        (character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127
+      ) &&
+      ['codex', 'claude'].includes(params.agent) &&
+      keysAre(params.providerSession, ['key', 'id']) &&
+      params.providerSession.key === 'session_id' &&
+      identity(params.providerSession.id) &&
+      params.presentation === 'background'
+    )
+  }
+  return true
+}
 
 export async function createSessionTabClient(directory) {
   const metadata = JSON.parse(
@@ -19,8 +59,13 @@ export async function createSessionTabClient(directory) {
         'session.tabs.activate',
         'terminal.reveal',
         'diagnostics.memory',
-        'terminal.list'
-      ].includes(method)
+        'terminal.list',
+        'status.get',
+        'worktree.show',
+        'terminal.ensureAgentSession',
+        'agentSession.reveal'
+      ].includes(method) ||
+      !validateResumeRequest(method, params)
     ) {
       throw new Error('Unsupported session navigation operation.')
     }
@@ -74,9 +119,16 @@ export async function createSessionTabClient(directory) {
             finish(new Error('Orca changed while resolving this session. Try again.'))
           } else if (reply.ok !== true) {
             finish(
-              Object.assign(new Error('Orca could not resolve or activate this Chat.'), {
-                code: reply.error?.code
-              })
+              Object.assign(
+                new Error(
+                  ['unknown_method', 'method_not_found'].includes(reply.error?.code)
+                    ? 'This Orca runtime does not support this conversation operation. Update Orca.'
+                    : 'Orca refused to resolve or open this saved conversation.'
+                ),
+                {
+                  code: reply.error?.code
+                }
+              )
             )
           } else {
             finish(null, reply.result)
@@ -87,20 +139,49 @@ export async function createSessionTabClient(directory) {
   }
 }
 
-export async function navigateSessionTab(agent, directory, connect = createSessionTabClient) {
+export async function navigateSessionTab(
+  agent,
+  directory,
+  connect = createSessionTabClient,
+  beforeResume = () => {},
+  checkDirectory
+) {
   if (!agent.workspace || !agent.sessionId) {
     throw new Error('No workspace was recorded for this Chat.')
   }
   const workspace = agent.workspace.replace(/^worktree:/, '')
   const worktree = `id:${workspace}`
   const request = await connect(directory)
-  const inventory = await request('session.tabs.list', { worktree })
-  const matches =
+  let inventory = await request('session.tabs.list', { worktree })
+  let matches =
     inventory?.tabs?.filter(
       (tab) => tab.type === 'agent-session' && tab.sessionId === agent.sessionId
     ) ?? []
-  if (inventory?.worktree !== workspace || matches.length !== 1) {
+  if (inventory?.worktree !== workspace || !Array.isArray(inventory.tabs) || matches.length > 1) {
     throw new Error('This Chat is no longer open in its recorded workspace.')
+  }
+  if (matches.length === 0) {
+    await prepareResume(agent, 'chat', request, checkDirectory)
+    beforeResume()
+    const result = await request('agentSession.reveal', { sessionId: agent.sessionId })
+    if (
+      result?.ok !== true ||
+      result.sessionId !== agent.sessionId ||
+      result.workspaceId !== workspace ||
+      result.agent !== agent.provider
+    ) {
+      throw new Error('Orca could not reopen the saved Chat in its original workspace.')
+    }
+    inventory = await request('session.tabs.list', { worktree })
+    matches =
+      inventory?.tabs?.filter(
+        (tab) => tab.type === 'agent-session' && tab.sessionId === agent.sessionId
+      ) ?? []
+    if (inventory?.worktree !== workspace || matches.length !== 1) {
+      throw new Error(
+        'Orca did not confirm the reopened Chat. Inspect its original workspace before trying again.'
+      )
+    }
   }
   // Tab activation alone cannot reveal an inactive Chat workspace in Orca 1.4.248.
   const { reveal } = await request('terminal.reveal', {

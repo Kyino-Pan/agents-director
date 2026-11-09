@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ActivityStore } from './activity-store.mjs'
-import { OrcaLogReader } from './orca-log-reader.mjs'
+import { OrcaLogReader, importStatusRow } from './orca-log-reader.mjs'
 import activate, { deactivate } from './main.mjs'
 
 const NOW = Date.now()
@@ -273,4 +273,43 @@ test('outcome markers without their source tables do not become healthy on the n
     assert.equal(store.sources.get(path).status, 'limited')
     assert.match(store.sources.get(path).detail, /missing outcome source/)
   }
+})
+
+test('journal retains only Chat resume location and identity, including across structured status refresh', async (context) => {
+  const { db, reader, store } = await fixture(context)
+  db.prepare('UPDATE agent_session_records SET record_json = ? WHERE session_id = ?').run(
+    JSON.stringify({
+      provider: 'codex',
+      location: { executionHostId: 'local', wslDistro: null, workspaceId: 'folder:original' },
+      providerHandleChain: [{ handle: { provider: 'codex', threadId: 'native-thread' } }],
+      launchEnv: { SECRET: 'must-not-copy' },
+      accountHome: { path: '/private-account' }
+    }),
+    'chat'
+  )
+  await reader.scan(NOW)
+  const agent = [...store.agents.values()].find((agent) => agent.sessionId === 'chat')
+  assert.deepEqual(agent.resumeTarget, {
+    kind: 'chat',
+    sessionId: 'chat',
+    provider: 'codex',
+    workspace: 'folder:original',
+    executionHostId: 'local',
+    wslDistro: null
+  })
+  importStatusRow(
+    store,
+    'structured-agent-session-chat:leaf',
+    {
+      connectionId: null,
+      worktreeId: 'folder:original',
+      agent: 'codex',
+      providerSession: { key: 'session_id', id: 'native-thread' },
+      receivedAt: NOW
+    },
+    NOW
+  )
+  assert.deepEqual(store.agents.get(agent.id).resumeTarget, agent.resumeTarget)
+  assert.equal(JSON.stringify(store.serialize()).includes('must-not-copy'), false)
+  assert.equal(JSON.stringify(store.serialize()).includes('/private-account'), false)
 })
