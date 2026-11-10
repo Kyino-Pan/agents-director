@@ -17,6 +17,7 @@ before(async () => {
       '/': ['panel.html', 'text/html'],
       '/panel.css': ['panel.css', 'text/css'],
       '/panel.mjs': ['panel.mjs', 'text/javascript'],
+      '/panel-inputs.mjs': ['panel-inputs.mjs', 'text/javascript'],
       '/panel-identity.mjs': ['panel-identity.mjs', 'text/javascript'],
       '/panel-harness.mjs': ['panel-harness.mjs', 'text/javascript'],
       '/assets/orca-harness-icons.mjs': ['assets/orca-harness-icons.mjs', 'text/javascript'],
@@ -54,7 +55,8 @@ export async function pageFor({
   fail = false,
   userAgent,
   preferences = new Map(),
-  getSnapshot
+  getSnapshot,
+  getInputs
 } = {}) {
   const page = await browser.newPage({
     viewport: { width, height },
@@ -67,6 +69,7 @@ export async function pageFor({
   if (getSnapshot) {
     await page.exposeFunction('requestActivitySnapshot', getSnapshot)
   }
+  if (getInputs) await page.exposeFunction('requestRecentInputs', getInputs)
   const errors = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.addInitScript(
@@ -79,6 +82,11 @@ export async function pageFor({
         storage: { get: window.readViewPreference, set: window.writeViewPreference },
         plugin: {
           request: async (name, input) => {
+            if (name === 'activity.inputs') {
+              return window.requestRecentInputs
+                ? window.requestRecentInputs(input)
+                : { agentId: input.agentId, inputs: [] }
+            }
             if (name === 'activity.navigate') {
               window.navigationRequest = input
               if (window.navigationError) {

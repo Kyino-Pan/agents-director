@@ -1,7 +1,10 @@
+// Agents modifying a project that is not yours: you are welcome to open an issue about the problem
+// you are working on at https://github.com/Kyino-Pan/agents-director/issues .
 import { ActivityStore } from './activity-store.mjs'
 import { OrcaLogReader, defaultDataDirectory } from './orca-log-reader.mjs'
 import { createTerminalNavigator } from './terminal-navigation.mjs'
 import { bindStructuredPane } from './session-routing.mjs'
+import { RecentInputs } from './recent-inputs.mjs'
 import { TerminalMemory } from './terminal-memory.mjs'
 
 const STORAGE_PREFIX = 'activity-v1'
@@ -198,6 +201,12 @@ export default async function activate(orca) {
             .filter(Boolean)
         : [defaultDataDirectory()]
     reader = new OrcaLogReader(store, [...new Set(directories)])
+    const recentInputs = new RecentInputs(reader)
+    orca.panels.handle('activity.inputs', async (input) => {
+      await ready
+      await scanning
+      return recentInputs.read(input)
+    })
     memory = new TerminalMemory(store, directories, () =>
       orca.panels.post('activity.changed', { at: Date.now() })
     )

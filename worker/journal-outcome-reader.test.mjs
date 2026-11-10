@@ -103,6 +103,23 @@ test('first activation restores named native Chat history; current host events j
   const { directory, path, write } = await fixture(context)
   write(1, turn('completed'), { format: 1 })
   write(2, turn('open', null))
+  write(3, {
+    itemId: 'human-input',
+    observedAt: NOW - 4000,
+    sequence: 3,
+    body: { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'Native human input' }] }
+  })
+  write(4, {
+    itemId: 'agent-input',
+    observedAt: NOW - 3000,
+    sequence: 4,
+    body: {
+      kind: 'message',
+      role: 'user',
+      from: { kind: 'agent' },
+      blocks: [{ type: 'text', text: 'Automated task' }]
+    }
+  })
   const before = await readFile(path)
   const handlers = new Map()
   const cache = new Map()
@@ -129,6 +146,11 @@ test('first activation restores named native Chat history; current host events j
   assert.equal(snapshot.agents.length, 1)
   assert.equal(snapshot.agents[0].label, 'Named Codex Chat')
   assert.equal(snapshot.agents[0].providerSessionId, 'native-thread')
+  const inputs = await handlers.get('activity.inputs')({ agentId: snapshot.agents[0].id })
+  assert.deepEqual(
+    inputs.inputs.map((item) => item.text),
+    ['Native human input']
+  )
   assert.ok(snapshot.agents[0].segments.some((segment) => segment.state === 'working'))
   listener({
     worktreeId: 'folder:project',

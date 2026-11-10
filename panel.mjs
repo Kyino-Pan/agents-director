@@ -1,3 +1,4 @@
+import { DetailInputs } from './panel-inputs.mjs'
 import { activeAgents, agentName, renderActivityDetail, visibleAgents } from './panel-identity.mjs'
 import { harnessIcon, harnessLabel, shortAgentId } from './panel-harness.mjs'
 import { installActivityActions, renderSources } from './panel-actions.mjs'
@@ -271,7 +272,7 @@ function render() {
       const description = `Live terminal and child processes: ${text} (${memory.metric}), sampled ${new Date(memory.collectedAt).toLocaleTimeString()}`
       const badge = node('span', 'lane-memory', text)
       badge.title = description
-      heading.append(badge)
+      meta.append(badge)
       lane.setAttribute('aria-label', `${lane.getAttribute('aria-label')}. ${description}`)
     }
     lane.append(heading, meta)
@@ -440,6 +441,8 @@ function render() {
   }
 }
 
+const detailInputs = new DetailInputs()
+
 function renderDetail() {
   renderActivityDetail({
     selection,
@@ -452,6 +455,12 @@ function renderDetail() {
     duration,
     unobservedDescription
   })
+  detailInputs.select(
+    $('detail').hidden || selection?.message
+      ? null
+      : displayed.agents.find((agent) => agent.id === selection?.agent),
+    paused
+  )
   if ($('detail').hidden) {
     $('detail').hidePopover()
   }
@@ -480,7 +489,7 @@ function inspect(target) {
     }
   }
   $('copy-status').textContent = ''
-  $('identity').open = !selection.message && selection.start === undefined
+  $('identity').open = false
   renderDetail()
   if (!$('detail').hidden) {
     $('detail').showPopover()

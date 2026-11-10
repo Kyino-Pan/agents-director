@@ -27,6 +27,15 @@ it can also reopen an existing saved Chat tab.
 - **Inspect:** click an agent, state segment or message arrow to open a floating detail view;
   Close or Escape dismisses it. The timeline fills the remaining viewport height, and inspection
   does not shrink it. Arrow controls support keyboard selection.
+- **Agent details:** Agent ID and the friendly Harness name stay visible, with **Copy agent ID**.
+  Session, provider session, pane, terminal, task, dispatch, run, workspace and parent identifiers
+  are under the initially collapsed **More information** disclosure. Lane and activity-segment
+  inspection share this layout; coordination messages retain their own message body.
+- **Recent user inputs:** lane and segment details show up to three saved user turns, newest first,
+  with timestamps and literal multiline text. Only the selected conversation is read on demand;
+  the list is independent of the timeline window. Missing timestamps say “Time unavailable”.
+  Each text is capped at 4,000 characters and marked when truncated. Empty and unavailable sources
+  have distinct messages. Coordination-message details omit this list.
 - **Lane order:** agents within each project default to most recently observed activity first.
   **Shorter links** toggles ordering to minimize the total vertical span of spawn and message
   connections in the selected window, counting each message even when arrows are visually bundled.
@@ -69,7 +78,7 @@ it can also reopen an existing saved Chat tab.
   on macOS / Ctrl-click on Windows and Linux. Ordinary clicks still inspect activity. Shift+F10
   opens the same menu from the keyboard. A current owner is preferred; eligible closed conversations reopen in their original workspace.
   Unverified exits, missing identities and unsupported routes show a reason without starting anything.
-- **Terminal memory:** the name's right edge shows current terminal-and-child-process memory,
+- **Terminal memory:** the second line of each lane shows current terminal-and-child-process memory,
   sampled at most every 30 seconds while the view requests updates. Units are MiB/GiB; hover
   for the metric and sample time. macOS uses footprint, Linux RSS and Windows working set,
   as reported by Orca diagnostics. This measures the terminal subtree, not an individual model.
@@ -192,6 +201,30 @@ up to 3,000 messages / 1,000 dispatches per source. Storage keeps at most 5,000 
 messages, with a 1.8 MiB serialized recorder-cache budget. Dense windows can exceed these bounds;
 the view explicitly reports partial coverage. Snapshot drawing is capped at 160 lanes, 4,000
 segments and 600 messages; message previews are capped at 400 characters.
+
+Recent inputs use the existing permitted provider transcript references (local Codex/Claude CLI)
+or the selected native Chat's active journal epoch. Codex supports legacy user events, wrapped and
+unwrapped user messages, and paginated `item_completed` user items. Paginated completed items take
+precedence over model copies; legacy user events take precedence over response copies. A mixed-format
+rollout uses its authoritative representation, so older turns recorded only in a superseded format
+may be absent. Claude supports string/text-block user messages and human prompt-mode queued commands.
+Native Chat supports inline v1–v4 user-message items and published outcome formats 1/2 over their
+inline prefix, including revisions, deletions and recorded alias/echo identities. Pending submissions
+without a saved user-message item are not inferred. Assistant/system text, tool results, nontext
+attachments and source-marked metadata or automated messages are excluded. CLI logs without authorship
+metadata cannot distinguish an externally typed prompt from a person's input; no text-based guess is made.
+
+The input reader retains one result for at most four seconds, with one active read globally. It
+accepts only a canonical agent ID, never a file path or a pane address. Direct conversation identity
+must match; internal children do not inherit their parent's inputs. It reads at most 32 MiB of a
+transcript (including a bounded header for its history mode), skips records over 1 MiB, and labels
+partial tails. Native reads use indexed published-key lookups and cap each request at 2,000 records/
+items, 16 MiB total JSON and 1 MiB per record; exceeding these limits reports unavailable rather than
+showing obsolete revisions. Transient text is bounded to three 4,000-character inputs per representation
+while parsing transcripts; journal folding is bounded by the limits above. Only three inputs are sent
+to the panel (under 96 KiB even with JSON escaping). Input text never enters ActivityStore, timeline
+snapshots, the 1.8 MiB recorder cache, or plugin storage. Closing/changing the detail clears its list;
+late responses cannot populate a different selection, and unchanged refreshes preserve the list DOM.
 
 ## Profiles and remote work
 

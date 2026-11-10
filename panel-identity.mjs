@@ -16,46 +16,64 @@ export const IDENTITY_FIELDS = [
   ['workspace', 'Workspace']
 ]
 
+const DETAIL_FIELDS = [
+  ...IDENTITY_FIELDS,
+  ['parentId', 'Parent agent'],
+  ['projectId', 'Project ID']
+]
+
 export function agentName(agent) {
   return agent?.label?.trim() && agent.label !== agent.id
     ? agent.label
     : `${agent?.provider ? harnessLabel(agent) : 'Agent'} session`
 }
 
-export function renderIdentity(agents, node) {
+export function renderIdentity(agents, node, displayed) {
   const signature = JSON.stringify(
-    agents.map((agent) => [agent.label, ...IDENTITY_FIELDS.map(([key]) => agent[key])])
+    agents.map((agent) => [
+      agent.label,
+      ...DETAIL_FIELDS.map(([key]) => agent[key]),
+      displayed.agents.find((item) => item.id === agent.parentId)?.label
+    ])
   )
   if ($('identity-list').dataset.identity === signature) {
     return
   }
   $('identity-list').dataset.identity = signature
   $('copy-status').textContent = ''
-  $('identity-list').replaceChildren(
-    ...agents.map((agent) => {
-      const section = node('div', 'identity-agent')
-      const header = node('div', 'identity-heading')
-      const copy = node('button', '', 'Copy agent ID')
-      copy.type = 'button'
-      copy.dataset.copyId = agent.id
-      if (agents.length > 1) {
-        header.append(node('strong', '', agentName(agent)))
-      }
-      header.append(copy)
-      const fields = node('dl')
-      for (const [key, label] of IDENTITY_FIELDS) {
-        if (agent[key]) {
-          const value = node('dd', '', agent[key])
-          if (key === 'id') {
-            value.dataset.identityId = agent.id
-          }
-          fields.append(node('dt', '', label), value)
+  for (const [target, entries, core] of [
+    ['identity-list', IDENTITY_FIELDS.slice(0, 2), true],
+    ['identity-more', DETAIL_FIELDS.slice(2), false]
+  ]) {
+    $(target).replaceChildren(
+      ...agents.map((agent) => {
+        const section = node('div', 'identity-agent')
+        const header = node('div', 'identity-heading')
+        if (agents.length > 1) header.append(node('strong', '', agentName(agent)))
+        if (core) {
+          const copy = node('button', '', 'Copy agent ID')
+          copy.type = 'button'
+          copy.dataset.copyId = agent.id
+          header.append(copy)
         }
-      }
-      section.append(header, fields)
-      return section
-    })
-  )
+        const fields = node('dl')
+        for (const [key, label] of entries) {
+          let text = key === 'provider' ? harnessLabel(agent) : agent[key]
+          if (key === 'parentId' && text) {
+            const parent = displayed.agents.find((item) => item.id === text)
+            text = parent ? `${agentName(parent)} · ${text}` : `${text} (outside this snapshot)`
+          }
+          if (text) {
+            const value = node('dd', '', text)
+            if (key === 'id') value.dataset.identityId = agent.id
+            fields.append(node('dt', '', label), value)
+          }
+        }
+        section.append(header, fields)
+        return section
+      })
+    )
+  }
 }
 
 $('identity-list').addEventListener('click', async (event) => {
@@ -78,11 +96,6 @@ $('identity-list').addEventListener('click', async (event) => {
       'Clipboard unavailable. Agent ID selected; copy it with your keyboard or context menu.'
   }
 })
-
-function parentName(snapshot, id) {
-  const parent = snapshot.agents.find((agent) => agent.id === id)
-  return parent ? agentName(parent) : `${id} (outside this snapshot)`
-}
 
 export function renderActivityDetail(context) {
   const {
@@ -137,7 +150,8 @@ export function renderActivityDetail(context) {
       [...new Set([message.from, message.to])].map(
         (id) => displayed.agents.find((agent) => agent.id === id) || { id }
       ),
-      node
+      node,
+      displayed
     )
   } else {
     $('related-messages').hidden = true
@@ -147,13 +161,11 @@ export function renderActivityDetail(context) {
       $('detail').hidden = true
       return
     }
-    renderIdentity([agent], node)
+    renderIdentity([agent], node, displayed)
     if (!segment) {
       $('detail-heading').textContent = agentName(agent)
-      $('detail-meta').textContent = [agent.provider, agent.workspace].filter(Boolean).join(' · ')
-      $('detail-body').textContent = agent.parentId
-        ? `Child of ${parentName(displayed, agent.parentId)}`
-        : 'Agent identity and observed activity.'
+      $('detail-meta').textContent = ''
+      $('detail-body').textContent = ''
       const last = agent.segments.at(-1)
       if (stateOf(last) === 'unknown') {
         $('detail-body').textContent = unobservedDescription(agent, last)
@@ -164,8 +176,7 @@ export function renderActivityDetail(context) {
     $('detail-heading').textContent = `${agentName(agent)} · ${stateLabel(state)}`
     $('detail-meta').textContent =
       `${dateFormat.format(segment.start)} – ${dateFormat.format(segment.end)} · ${duration(segment.end - segment.start)}`
-    $('detail-body').textContent =
-      `Observed via ${segment.source || 'an unknown source'}.\n${agent.workspace || 'Workspace unavailable'}${agent.parentId ? `\nParent agent: ${parentName(displayed, agent.parentId)}` : ''}`
+    $('detail-body').textContent = `Observed via ${segment.source || 'an unknown source'}.`
     if (state === 'unknown') {
       $('detail-body').textContent = unobservedDescription(agent, segment)
     }
