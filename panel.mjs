@@ -41,6 +41,7 @@ let subscription
 let resizeFrame = null
 let renderedWidth = 0
 let renderedHeight = 0
+let renderedZoomWidth = 0
 let renderedAgents = []
 let gestureAgents = null
 let gestureTimer
@@ -85,18 +86,33 @@ function windowLabel(value) {
     .replace('h 0m', 'h')
 }
 
+function zoomFraction(value) {
+  return maxHours === minHours ? 0 : Math.log(value / minHours) / Math.log(maxHours / minHours)
+}
+
 function renderZoom(snapshot) {
   maxHours = Math.min(168, Math.max(1 / 60, (snapshot.now - snapshot.windowStart) / HOUR))
   minHours = Math.min(1 / 12, maxHours)
   hours = Math.min(preferences.hours, maxHours)
-  const fraction =
-    maxHours === minHours ? 0 : Math.log(hours / minHours) / Math.log(maxHours / minHours)
-  $('zoom').max = '1000'
-  $('zoom').value = String(Math.round(fraction * 1000))
+  $('zoom').disabled = maxHours === minHours
+  $('zoom').value = String(Math.round(zoomFraction(hours) * 1000))
   $('zoom').setAttribute('aria-valuetext', `${duration(hours * HOUR)} of observed history`)
   $('zoom-min').textContent = windowLabel(minHours)
   $('zoom-limit').textContent = windowLabel(maxHours)
   $('zoom-value').textContent = windowLabel(hours)
+  const width = $('zoom-ticks').clientWidth
+  renderedZoomWidth = width
+  let previousPosition = -Infinity
+  for (const tick of $('zoom-ticks').children) {
+    const value = Number(tick.dataset.hours)
+    const fraction = zoomFraction(value)
+    const position = fraction * width
+    tick.hidden = value < minHours || value > maxHours || position - previousPosition < 36
+    if (!tick.hidden) {
+      tick.style.left = `${fraction * 100}%`
+      previousPosition = position
+    }
+  }
 }
 
 function unobservedDescription(agent, segment) {
@@ -554,6 +570,18 @@ $('shorten-links').addEventListener('click', () => {
 })
 $('search').addEventListener('input', render)
 $('retry').addEventListener('click', () => void refresh())
+for (const value of [1 / 4, 1, 6, 24, 168]) {
+  const tick = node('button', 'zoom-tick', value === 24 ? '1d' : windowLabel(value))
+  tick.type = 'button'
+  tick.hidden = true
+  tick.dataset.hours = String(value)
+  tick.setAttribute('aria-label', `Set window to ${duration(value * HOUR)}`)
+  tick.addEventListener('click', () => {
+    preferences.set({ hours: Math.max(minHours, Math.min(value, maxHours)) })
+    render()
+  })
+  $('zoom-ticks').append(tick)
+}
 $('zoom').addEventListener('input', () => {
   const fraction = Number($('zoom').value) / 1000
   hours =
@@ -680,7 +708,8 @@ document.addEventListener('keydown', (event) => {
 })
 const viewportChanged = () =>
   $('chart-scroll').clientWidth !== renderedWidth ||
-  $('chart-scroll').clientHeight !== renderedHeight
+  $('chart-scroll').clientHeight !== renderedHeight ||
+  $('zoom-ticks').clientWidth !== renderedZoomWidth
 const resize = new ResizeObserver(() => {
   if (disposed || resizeFrame !== null || !viewportChanged()) {
     return
@@ -694,6 +723,7 @@ const resize = new ResizeObserver(() => {
 })
 installActivityActions(() => displayed)
 resize.observe($('chart-scroll'))
+resize.observe($('zoom-ticks'))
 if (window.orca?.plugin?.on) {
   subscription = window.orca.plugin.on('activity.changed', () => void refresh())
 }

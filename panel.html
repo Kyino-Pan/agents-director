@@ -34,29 +34,31 @@
           <button type="button" id="pause" aria-pressed="false">Pause view</button>
         </div>
         <div class="time-controls">
-          <label for="zoom">Window</label>
-          <span id="zoom-min" class="zoom-bound">5m</span>
-          <input
-            id="zoom"
-            type="range"
-            min="0"
-            max="11"
-            value="7"
-            step="1"
-            aria-valuetext="24 hours"
-          />
-          <span id="zoom-limit" class="zoom-bound">7d</span>
-          <output id="zoom-value" for="zoom">24h</output>
-        </div>
-        <div class="range-controls">
-          <label>From <input id="range-start" type="datetime-local" /></label
-          ><label>To <input id="range-end" type="datetime-local" /></label>
-        </div>
-        <div class="overview">
-          <span id="summary">Loading activity…</span><span id="period" class="mono"></span>
+          <div class="window-controls">
+            <label for="zoom">Window</label>
+            <span id="zoom-min" class="zoom-bound">5m</span>
+            <div class="zoom-track">
+              <input
+                id="zoom"
+                type="range"
+                min="0"
+                max="1000"
+                value="0"
+                step="1"
+                disabled
+                aria-valuetext="Loading observed history"
+              />
+              <div id="zoom-ticks" role="group" aria-label="Window duration presets"></div>
+            </div>
+            <span id="zoom-limit" class="zoom-bound">7d</span>
+            <output id="zoom-value" for="zoom">24h</output>
+          </div>
+          <div class="range-controls">
+            <label>From <input id="range-start" type="datetime-local" /></label>
+            <label>To <input id="range-end" type="datetime-local" /></label>
+          </div>
         </div>
       </header>
-      <div id="notice" class="notice" role="status" hidden></div>
       <div id="navigation-status" class="notice" role="status" hidden></div>
       <div id="failure" class="failure" role="alert" hidden>
         <span id="failure-text"></span><button type="button" id="retry">Retry</button>
@@ -96,6 +98,12 @@
           </div>
         </div>
       </section>
+      <footer class="footer">
+        <div class="overview">
+          <span id="summary">Loading activity…</span><span id="period" class="mono"></span>
+        </div>
+        <div id="notice" class="notice" role="status" hidden></div>
+      </footer>
       <section
         id="detail"
         class="detail"

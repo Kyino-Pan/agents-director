@@ -243,7 +243,9 @@ test('dense timelines fill the available height and inspection does not shrink t
       before.height > 510,
       `Timeline uses more than half the 1020px viewport at width ${width}`
     )
-    assert.ok(Math.abs(before.y + before.height - 1020) <= 2)
+    const footer = await page.locator('.footer').boundingBox()
+    assert.ok(Math.abs(before.y + before.height - footer.y) <= 2)
+    assert.equal(footer.y + footer.height, 1020)
     // Query current lanes and their scroll viewport together; a resize redraw can
     // detach a previously resolved array of lane elements before evaluation runs.
     const visibleRows = await page.evaluate(() => {
