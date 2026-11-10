@@ -301,7 +301,9 @@ test('names stay primary while full identities remain searchable, inspectable an
   await page.locator('.lane').focus()
   await page.keyboard.press('Enter')
   assert.equal(await page.locator('#detail-heading').textContent(), agent.label)
-  assert.equal(await page.locator('#identity').getAttribute('open'), '')
+  assert.equal(await page.locator('#identity').getAttribute('open'), null)
+  assert.match(await page.locator('#identity-list').textContent(), new RegExp(agent.id))
+  await page.locator('#identity summary').click()
   for (const value of [
     agent.id,
     agent.sessionId,
@@ -312,7 +314,7 @@ test('names stay primary while full identities remain searchable, inspectable an
     agent.dispatchId,
     agent.taskId
   ]) {
-    assert.match(await page.locator('#identity-list').textContent(), new RegExp(value))
+    assert.match(await page.locator('#detail').textContent(), new RegExp(value))
   }
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await page.getByRole('button', { name: 'Copy agent ID' }).click()

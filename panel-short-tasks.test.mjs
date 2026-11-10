@@ -40,7 +40,7 @@ for (const [width, dark] of [
       assert.equal(await page.locator('.spawn, .message-path').count(), 0)
       await page.locator('.lane').click()
       assert.match(
-        await page.locator('#detail-body').textContent(),
+        await page.locator('#identity-more').textContent(),
         /short \(outside this snapshot\)/
       )
       await page.getByRole('button', { name: 'Close', exact: true }).click()

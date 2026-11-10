@@ -2,6 +2,7 @@ import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
+import { RecentInputs } from './worker/recent-inputs.mjs'
 import { ActivityStore } from './worker/activity-store.mjs'
 import { OrcaLogReader, defaultDataDirectory } from './worker/orca-log-reader.mjs'
 
@@ -9,6 +10,7 @@ import { OrcaLogReader, defaultDataDirectory } from './worker/orca-log-reader.mj
 export async function startPreview({ directories = [defaultDataDirectory()], port = 0 } = {}) {
   const store = new ActivityStore()
   const reader = new OrcaLogReader(store, directories)
+  const recentInputs = new RecentInputs(reader)
   const root = `/${randomUUID()}/`
   let scan = Promise.resolve()
   let closing = false
@@ -34,6 +36,7 @@ export async function startPreview({ directories = [defaultDataDirectory()], por
     '': ['panel.html', 'text/html; charset=utf-8'],
     'panel.css': ['panel.css', 'text/css; charset=utf-8'],
     'panel.mjs': ['panel.mjs', 'text/javascript; charset=utf-8'],
+    'panel-inputs.mjs': ['panel-inputs.mjs', 'text/javascript; charset=utf-8'],
     'panel-identity.mjs': ['panel-identity.mjs', 'text/javascript; charset=utf-8'],
     'panel-harness.mjs': ['panel-harness.mjs', 'text/javascript; charset=utf-8'],
     'assets/orca-harness-icons.mjs': [
@@ -99,6 +102,16 @@ export async function startPreview({ directories = [defaultDataDirectory()], por
     const requestUrl = new URL(request.url, `http://${expectedHost}`)
     const route = requestUrl.pathname.slice(root.length)
     try {
+      if (route === 'inputs') {
+        await scan
+        response.setHeader('content-type', 'application/json; charset=utf-8')
+        response.end(
+          JSON.stringify(
+            await recentInputs.read({ agentId: requestUrl.searchParams.get('agentId') })
+          )
+        )
+        return
+      }
       if (route === 'snapshot') {
         await scan
         response.setHeader('content-type', 'application/json; charset=utf-8')
@@ -115,6 +128,7 @@ export async function startPreview({ directories = [defaultDataDirectory()], por
         response.setHeader('content-type', 'text/javascript; charset=utf-8')
         response.end(`window.orca={locale:navigator.language,plugin:{request:async(name,input)=>{
           if(name==='activity.navigate')throw new Error('Open Agents Director inside Orca to navigate to a terminal.');
+          if(name==='activity.inputs'){const r=await fetch('./inputs?agentId='+encodeURIComponent(input?.agentId||''));if(!r.ok)throw new Error('Inputs unavailable');return r.json();}
           if(name!=='activity.snapshot')throw new Error('Unknown preview request');
           const response=await fetch('./snapshot?hideShortTasks='+String(input?.hideShortTasks!==false));if(!response.ok)throw new Error('Collector unavailable');
           return response.json();},on:()=>({dispose(){}})}};`)

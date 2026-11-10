@@ -14,6 +14,16 @@ same user's privileges. The plugin still asks for Full access.
   locations outside these roots are unavailable; there is no extra-directory grant setting.
 - Status JSON is capped at 32 MiB before reading; profile indexes and runtime metadata at
   64 KiB. Transcript reads are bounded to 32 MiB per pass.
+- Recent user inputs are a read-only, on-demand detail request accepting only a canonical agent ID.
+  The worker resolves a directly recorded Codex/Claude transcript or unique native Chat journal;
+  pane/dispatch reuse and parent-child relationships do not authorize another conversation's text.
+  Existing file-root checks also apply to input reads. A single active read and a single four-second
+  result cache bound global demand. Transcript reads include their header within a 32 MiB budget;
+  records over 1 MiB are skipped and tails are labelled. Native journal reads cap at 2,000 records/
+  items and 16 MiB JSON, refuse unsupported formats, and apply only the current published epoch.
+  Results contain at most three 4,000-character texts, with explicit truncation. Inputs never enter
+  persistent history, snapshots or plugin storage; panel rendering uses textContent, never Markdown
+  or HTML. No new host capability, external network access, shell command or arbitrary panel path is added.
 - Terminal navigation only runs the CLI bundled next to Orca's worker entry using the current
   executable. There is no PATH fallback. Only exact `show`, `list` and `switch` argument shapes
   are admitted. Child processes receive a small environment allowlist, excluding loader flags,

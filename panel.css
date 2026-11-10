@@ -363,7 +363,11 @@ input::placeholder {
   white-space: nowrap;
 }
 .lane-state {
-  flex-shrink: 0;
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--orca-muted-foreground);
   font-size: 11px;
 }
@@ -371,15 +375,18 @@ input::placeholder {
   color: var(--orca-destructive);
 }
 .lane-meta {
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   margin-top: 0;
   line-height: 1.1;
   color: var(--orca-muted-foreground);
   font-size: 11px;
 }
 .lane-identity {
+  min-width: 0;
+  flex-shrink: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -387,7 +394,7 @@ input::placeholder {
 }
 .lane-identity::before {
   content: '·';
-  margin-right: 8px;
+  margin-right: 4px;
 }
 .plot {
   min-width: 0;
@@ -773,4 +780,34 @@ input::placeholder {
 }
 .view-empty p {
   margin: 4px 0 0;
+}
+
+#detail-body:empty,
+.detail-meta:empty {
+  display: none;
+}
+#recent-inputs {
+  margin-top: 12px;
+}
+#recent-inputs h3 {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+.user-input {
+  border-top: 1px solid var(--orca-border);
+  padding: 8px 0;
+  font-size: 12px;
+}
+.user-input time,
+.user-input small,
+.inputs-note {
+  color: var(--orca-muted-foreground);
+  font-size: 11px;
+}
+.user-input p {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
 }

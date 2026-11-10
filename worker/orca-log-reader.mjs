@@ -234,7 +234,7 @@ export function importStatusRow(store, paneKey, row, now) {
   }
   const path = session?.transcriptPath
   return !row.connectionId && typeof path === 'string' && isAbsolute(path)
-    ? { path, id, provider }
+    ? { path, id, provider, providerSessionId: native }
     : null
 }
 
@@ -530,10 +530,7 @@ export class OrcaLogReader {
     }
   }
 
-  async transcript(entry, now) {
-    if (!['codex', 'claude'].includes(entry.provider) || extname(entry.path) !== '.jsonl') {
-      throw new Error('Only Codex and Claude JSONL activity transcripts are supported.')
-    }
+  transcriptRoots(entry) {
     const roots = [entry.directory]
     if (resolve(entry.directory) === resolve(defaultDataDirectory())) {
       const home =
@@ -546,6 +543,14 @@ export class OrcaLogReader {
         )
       )
     }
+    return roots
+  }
+
+  async transcript(entry, now) {
+    if (!['codex', 'claude'].includes(entry.provider) || extname(entry.path) !== '.jsonl') {
+      throw new Error('Only Codex and Claude JSONL activity transcripts are supported.')
+    }
+    const roots = this.transcriptRoots(entry)
     const file = await openSourceFile(entry.path, roots)
     try {
       const info = await file.stat()

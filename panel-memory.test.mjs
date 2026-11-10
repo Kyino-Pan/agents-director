@@ -23,9 +23,13 @@ test('memory fits the existing narrow agent column, explains scope and omits mis
           badges.map((b) => {
             const lane = b.closest('.lane').getBoundingClientRect()
             const rect = b.getBoundingClientRect()
-            const name = b.parentElement.querySelector('.lane-name').getBoundingClientRect()
+            const name = b.closest('.lane').querySelector('.lane-name').getBoundingClientRect()
             return {
-              fits: rect.right <= lane.right && rect.left >= name.right,
+              fits:
+                rect.right <= lane.right &&
+                rect.left >= lane.left &&
+                rect.top >= name.bottom &&
+                b.parentElement.className === 'lane-meta',
               nameVisible: name.width >= 20,
               narrow: lane.width <= 128
             }
