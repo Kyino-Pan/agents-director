@@ -27,9 +27,9 @@ export class SessionRouting {
       if (!['status-cache', 'transcript', 'journal'].includes(point.source)) {
         continue
       }
-      const times = evidence.get(point.agentId) ?? []
-      times.push(point.at)
-      evidence.set(point.agentId, times)
+      const points = evidence.get(point.agentId) ?? []
+      points.push(point)
+      evidence.set(point.agentId, points)
     }
     for (const agent of store.agents.values()) {
       if (!agent.providerSessionId && !agent.sessionId) {
@@ -40,7 +40,8 @@ export class SessionRouting {
           continue
         }
         const owners = this.endpoints.get(address) ?? []
-        owners.push({ id: agent.id, times: evidence.get(agent.id) ?? [] })
+        const points = evidence.get(agent.id) ?? []
+        owners.push({ id: agent.id, times: points.map((point) => point.at), points })
         this.endpoints.set(address, owners)
       }
     }
@@ -85,6 +86,49 @@ export class SessionRouting {
     return this.store.agent(fallback ?? address ?? 'unknown-address')
   }
 
+  dispatchOwner(alias, { handle, paneKey, sessionId, workspace }, start, end) {
+    if (sessionId) {
+      return this.resolve({ sessionId }, start)
+    }
+    const previous = this.store.agents.get(this.store.aliases.get(alias))
+    // An established assignment belongs to its conversation even after /new.
+    if (previous?.providerSessionId || previous?.sessionId) {
+      return previous.id
+    }
+    if (!Number.isFinite(start) || end < start) return undefined
+    const candidates = new Set()
+    const observedDuring = new Set()
+    for (const address of [handle, paneKey && `pane:${paneKey}`]) {
+      const owners = this.endpoints.get(address) ?? []
+      const latest = Math.max(...owners.flatMap((owner) => owner.times.filter((at) => at <= start)))
+      for (const owner of owners) {
+        // Include ties and all observed owners during this assignment. A later
+        // first observation can enrich a launch, but conflicting owners cannot.
+        if (owner.times.some((at) => at === latest || (at > start && at <= end))) {
+          candidates.add(owner.id)
+        }
+        if (owner.points.some((point) => point.at <= end && (point.until ?? point.at) >= start)) {
+          observedDuring.add(owner.id)
+        }
+      }
+    }
+    if (candidates.size !== 1) return undefined
+    const id = [...candidates][0]
+    // Stale ownership before launch cannot claim a new assignment before its
+    // first observation; otherwise a subsequent /new could never be enriched.
+    if (!observedDuring.has(id)) return undefined
+    const agent = this.store.agents.get(id)
+    if (
+      (handle && agent.terminalHandle && handle !== agent.terminalHandle) ||
+      (paneKey && agent.paneKey && paneKey !== agent.paneKey) ||
+      (workspace &&
+        agent.workspace &&
+        workspace.replace(/^worktree:/, '') !== agent.workspace.replace(/^worktree:/, ''))
+    )
+      return undefined
+    return id
+  }
+
   bind(alias, id, details) {
     const previous = this.store.aliases.get(alias)
     if (previous && previous !== id) {
@@ -93,7 +137,7 @@ export class SessionRouting {
         if (agent.runId === details.runId) {
           delete agent.runId
         }
-      } else if (previous === alias) {
+      } else {
         this.store.merge(previous, id)
       }
     }

@@ -53,6 +53,10 @@ it can also reopen an existing saved Chat tab.
   recorded parent ID even when that parent is outside the snapshot, without a substitute target.
   Changing the filter requests fresh data, including while paused; all other view preferences
   remain in place. If every task is hidden, the empty state explains how to turn the filter off.
+  Ready-only terminal placeholders without a saved conversation, assignment or observed
+  working/waiting/blocked activity are omitted independently of this toggle and before drawing
+  budgets. Their raw observations remain cached for later enrichment. Unidentified active or
+  previously active agents, real unknown assignments and incomplete histories remain eligible.
 - During wheel panning or zooming, existing lane positions stay fixed. New agents append at the
   bottom so their activity, spawn links and messages appear immediately as the timeline moves.
   After 180ms without wheel input, lanes filter, regroup and smoothly reorder for the final window.
@@ -82,6 +86,14 @@ orchestration task names, then terminal titles. Lower-priority observations neve
 known name. Unnamed history keeps its provider/ID fallback. Canonical IDs stay stable when names
 change; available Orca/provider session IDs, pane keys, terminal handles and orchestration IDs
 remain attached for inspection, search and terminal navigation.
+
+Dispatches join a saved conversation using explicit session identity or unambiguous observed
+ownership during the assignment, bounded by completion or the next assignment on that address.
+This also joins launches whose first conversation observation arrives after dispatch. Conflicting
+owners, stale pre-launch evidence and workspace/address mismatches stay unresolved. Repeated scans
+and cache restores preserve established dispatch bindings; a reused pane cannot transfer an old
+assignment to its successor. Followups on the same conversation retain their dispatch aliases and
+activity, with the latest task supplying lane metadata. Assignment alone never implies working.
 
 Host API 1.2 has no terminal navigation or resume method, so the trusted worker uses the
 desktop's bundled CLI and authenticated local runtime socket. Before `terminal switch`, it
