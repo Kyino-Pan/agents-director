@@ -63,6 +63,7 @@ it can also reopen an existing saved Chat tab.
   Panning into an empty interval keeps the timeline and scroll area available, with an in-chart
   message, so you can scroll back without resetting the window.
 - **Data sources:** right-click the view → **Data sources**. The coverage details open on demand.
+  The agent/message summary, selected period and coverage notice stay in the footer below the timeline.
 - **Open or resume Chat / terminal:** right-click an agent lane or segment → **Open or resume Chat** for native
   sessions or **Open or resume terminal** for CLI agents, or Command-click
   on macOS / Ctrl-click on Windows and Linux. Ordinary clicks still inspect activity. Shift+F10
@@ -76,6 +77,9 @@ it can also reopen an existing saved Chat tab.
   subagents without their own terminal, remote terminals and imported sources show no value.
   Samples expire after 60 seconds and never enter the history cache. Pause freezes these values
   along with the view; panning history still shows current memory for a currently owned terminal.
+- **Window controls:** the slider and From/To fields share a row in wide panels and wrap in narrow
+  panels. Round duration ticks beneath the logarithmic slider select an exact window; available
+  ticks adapt to retained history and panel width. Dragging and native slider keys remain continuous.
 - **Pause view:** freezes the displayed snapshot for inspection; collection continues. Resume shows
   the latest snapshot. The time-scale slider or Ctrl/Command-wheel adjusts the visible window; horizontal wheel or Shift-wheel pans it. Ordinary vertical scrolling moves through the page and tracks. Project bands with recorded communication are placed near one another. Only agents with observed activity, a completion or spawn, or a coordination message in the selected window are shown; an old completed or unobserved state alone does not keep a lane visible. The From and To fields select local-time endpoints within the retained history. Nearby messages between the same agents collapse into a count; select it to inspect each message.
 

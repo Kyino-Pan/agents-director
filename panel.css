@@ -134,26 +134,67 @@ input::placeholder {
 }
 .time-controls {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 16px;
   margin-top: 12px;
   font-size: 11px;
   color: var(--orca-muted-foreground);
 }
-.time-controls input {
+.window-controls {
+  display: flex;
+  flex: 1 1 340px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-bottom: 22px;
+}
+.zoom-track {
+  position: relative;
   flex: 1;
-  min-width: 60px;
-  height: 20px;
+  min-width: 0;
+  height: 30px;
+}
+#zoom {
+  display: block;
+  height: 30px;
+  margin: 0;
   padding: 0;
   border: 0;
   accent-color: var(--orca-foreground);
   cursor: ew-resize;
 }
+#zoom-ticks {
+  position: absolute;
+  top: 100%;
+  left: 8px;
+  right: 8px;
+}
+.zoom-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  height: 22px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--orca-muted-foreground);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.zoom-tick::before {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: 50%;
+  height: 3px;
+  border-left: 1px solid var(--orca-border);
+}
 .zoom-bound {
   font-family: var(--font-mono);
 }
 #zoom-value {
-  width: 36px;
+  width: 8ch;
+  flex-shrink: 0;
   text-align: right;
   color: var(--orca-foreground);
   font-family: var(--font-mono);
@@ -163,9 +204,15 @@ input::placeholder {
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 4px 12px;
-  margin-top: 14px;
   color: var(--orca-muted-foreground);
   font-size: 11px;
+}
+.footer {
+  flex-shrink: 0;
+  padding: 8px 20px;
+}
+.footer .notice {
+  margin: 4px 0 0;
 }
 .mono {
   font-family: var(--font-mono);
@@ -454,6 +501,8 @@ input::placeholder {
 }
 .empty {
   flex: 1;
+  min-height: 0;
+  overflow: auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -600,8 +649,8 @@ input::placeholder {
   .search {
     min-width: 120px;
   }
-  .overview {
-    margin-top: 10px;
+  .footer {
+    padding: 8px 12px;
   }
   .legend {
     padding: 8px 12px;
@@ -642,14 +691,18 @@ input::placeholder {
 .range-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 8px 12px;
 }
 .range-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--orca-muted-foreground);
 }
 .range-controls input {
-  max-width: 190px;
+  width: 190px;
+  min-width: 0;
+  font-size: 12px;
   color: var(--orca-foreground);
   background: var(--orca-background);
   border: 1px solid var(--orca-border);
