@@ -11,6 +11,7 @@ export function readOrchestration(reader, directory, now, tabWorkspaces = new Ma
   const runs = db.prepare('SELECT * FROM runs ORDER BY created_at DESC LIMIT 1000').all()
   let routing = new SessionRouting(reader.store)
   const runByAddress = new Map()
+  const assignments = []
   const coordinator = (run) => ({
     handle: run.coordinator_handle,
     paneKey: run.coordinator_pane_key,
@@ -35,6 +36,18 @@ export function readOrchestration(reader, directory, now, tabWorkspaces = new Ma
     if (owner) {
       return owner
     }
+    const assigned = new Set(
+      assignments
+        .filter(
+          (assignment) =>
+            at >= assignment.start &&
+            at <= assignment.end &&
+            ((handle && handle === assignment.handle) ||
+              (paneKey && paneKey === assignment.paneKey))
+        )
+        .map((assignment) => assignment.id)
+    )
+    if (assigned.size === 1) return [...assigned][0]
     const run =
       direct ??
       runs.find(
@@ -66,20 +79,36 @@ export function readOrchestration(reader, directory, now, tabWorkspaces = new Ma
       taskNames.set(taskId, clean(task?.display_name) ?? clean(task?.task_title))
     }
   }
-  for (const dispatch of dispatches) {
+  // Apply older assignments first so followups supply the current task/name.
+  for (const dispatch of [...dispatches].reverse()) {
     const placement = placements.get(dispatch.id)
     const terminalHandle = clean(dispatch.assignee_handle) ?? placement?.terminalHandle
     const dispatchFailed = ['failed', 'circuit_broken'].includes(dispatch.status)
-    const aliases = [
-      terminalHandle,
-      dispatch.assignee_pane_key ? `pane:${dispatch.assignee_pane_key}` : null,
-      dispatch.assignee_orca_session_id
-        ? `orca_session_id:${dispatch.assignee_orca_session_id}`
-        : null
-    ].filter(Boolean)
     const start = timestamp(dispatch.dispatched_at)
     const end = timestamp(dispatch.completed_at)
     const created = timestamp(dispatch.created_at) ?? start
+    const address = {
+      handle: terminalHandle,
+      paneKey: clean(dispatch.assignee_pane_key),
+      sessionId: clean(dispatch.assignee_orca_session_id),
+      workspace: placement?.workspace
+    }
+    const nextAssignment = dispatches
+      .filter(
+        (next) =>
+          next.id !== dispatch.id &&
+          ((address.paneKey && next.assignee_pane_key === address.paneKey) ||
+            (terminalHandle &&
+              (clean(next.assignee_handle) ?? placements.get(next.id)?.terminalHandle) ===
+                terminalHandle))
+      )
+      .map((next) => timestamp(next.dispatched_at) ?? timestamp(next.created_at))
+      .filter((at) => at > (start ?? created))
+    const alias = `dispatch:${dispatch.id}`
+    const assignmentEnd = Math.min(end ?? now, ...nextAssignment.map((at) => at - 1))
+    const owner = routing.dispatchOwner(alias, address, start ?? created, assignmentEnd)
+    const target = owner ?? reader.store.agent(alias)
+    const current = reader.store.agents.get(target)
     const parent =
       dispatch.creator_dispatch_id && dispatchById.has(dispatch.creator_dispatch_id)
         ? reader.store.agent(`dispatch:${dispatch.creator_dispatch_id}`)
@@ -88,31 +117,49 @@ export function readOrchestration(reader, directory, now, tabWorkspaces = new Ma
           : dispatch.creator_handle || dispatch.creator_pane_key
             ? endpoint(dispatch.creator_handle, created, dispatch.creator_pane_key)
             : endpoint(`run:${dispatch.run_id}`, created)
-    const id = reader.store.agent(
-      `dispatch:${dispatch.id}`,
-      {
-        label: `Worker ${dispatch.id.slice(0, 8)}`,
-        labelSource: 'fallback',
-        ...(taskNames.get(dispatch.task_id)
-          ? { label: taskNames.get(dispatch.task_id), labelSource: 'task' }
-          : {}),
-        runId: dispatch.run_id,
-        dispatchId: dispatch.id,
-        dispatchFailed,
-        taskId: clean(dispatch.task_id),
-        workspace: placement?.workspace,
-        sessionId: clean(dispatch.assignee_orca_session_id),
-        paneKey: clean(dispatch.assignee_pane_key),
-        terminalHandle,
-        ...(dispatch.creator_handle !== dispatch.assignee_handle
-          ? {
-              parentId: reader.store.agent(parent),
-              spawnedAt: start ?? timestamp(dispatch.created_at)
-            }
-          : {})
-      },
-      aliases
-    )
+    const id = routing.bind(alias, target, {
+      label: `Worker ${dispatch.id.slice(0, 8)}`,
+      labelSource: 'fallback',
+      ...(taskNames.get(dispatch.task_id)
+        ? { label: taskNames.get(dispatch.task_id), labelSource: 'task' }
+        : {}),
+      runId: dispatch.run_id,
+      dispatchId: dispatch.id,
+      dispatchFailed,
+      taskId: clean(dispatch.task_id),
+      workspace: current?.workspace ?? placement?.workspace,
+      sessionId: clean(dispatch.assignee_orca_session_id),
+      paneKey: current?.paneKey ?? address.paneKey,
+      terminalHandle: current?.terminalHandle ?? terminalHandle,
+      ...(dispatch.creator_handle !== dispatch.assignee_handle && parent !== target
+        ? {
+            parentId: reader.store.agent(parent),
+            spawnedAt: start ?? timestamp(dispatch.created_at)
+          }
+        : {})
+    })
+    for (const addressAlias of [
+      terminalHandle,
+      address.paneKey && `pane:${address.paneKey}`
+    ].filter(Boolean)) {
+      const previous = reader.store.aliases.get(addressAlias)
+      const placeholder = reader.store.agents.get(previous)
+      // Only an unassigned pane placeholder may join an assignment by address.
+      // Never replace the current durable owner with an older dispatch on rescan.
+      if (
+        placeholder &&
+        previous.startsWith('pane:') &&
+        previous !== id &&
+        !placeholder.providerSessionId &&
+        !placeholder.sessionId &&
+        !placeholder.dispatchId &&
+        !placeholder.runId
+      ) {
+        reader.store.merge(previous, id)
+      }
+      if (!previous) reader.store.aliases.set(addressAlias, id)
+    }
+    assignments.push({ ...address, id, start: start ?? created, end: assignmentEnd })
     // Dispatch assignment proves a task was assigned, not that its agent was continuously working.
     if (start !== null) {
       reader.store.point(`dispatch:${dispatch.id}:start`, id, start, 'unknown', 'orchestration')

@@ -16,6 +16,27 @@ const namePriority = (agent) => NAME_PRIORITY[agent.labelSource] ?? 0
 
 const SHORT_TASK_MS = 3 * 60 * 1000
 
+// Ready/idle alone proves a terminal exists, not that a conversation ever ran.
+// Keep the observations in storage so later identity/activity can enrich them.
+function isReadyPlaceholder(agent, points) {
+  return (
+    agent.paneKey &&
+    !agent.providerSessionId &&
+    !agent.sessionId &&
+    !agent.dispatchId &&
+    !agent.taskId &&
+    !agent.runId &&
+    !agent.parentId &&
+    !agent.spawnedAt &&
+    !agent.incompleteActivityHistory &&
+    points.some((point) => point.state === 'done') &&
+    points.every(
+      (point) =>
+        ['live', 'status-cache'].includes(point.source) && ['done', 'unknown'].includes(point.state)
+    )
+  )
+}
+
 function mergeIntervals(intervals) {
   const merged = []
   for (const [start, end] of intervals.sort((a, b) => a[0] - b[0])) {
@@ -345,6 +366,7 @@ export class ActivityStore {
     }
     let hiddenShortTasks = 0
     const agents = [...this.agents.values()]
+      .filter((agent) => !isReadyPlaceholder(agent, grouped.get(agent.id) ?? []))
       .filter(
         (agent) =>
           !agent.dispatchFailed ||
