@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { readSourceText } from './source-files.mjs'
+import { timestamp } from './activity-store.mjs'
 
 const clean = (value) =>
   typeof value === 'string' ? value.trim().slice(0, 2048) || undefined : undefined
@@ -94,6 +95,11 @@ export async function readProjectCatalog(reader, directory) {
         session?.closedTerminalTabTombstonesByTabId ?? {}
       )) {
         recordTab(tabId, closed?.worktreeId)
+        const at = timestamp(closed?.closedAt)
+        const workspace = clean(closed?.worktreeId)?.replace(/^worktree:/, '')
+        if (at !== null && workspace) {
+          reader.store.terminalClosures.set(`${workspace}:${tabId}`, at)
+        }
       }
     }
     const rows = (domain) => (Array.isArray(documents.get(domain)) ? documents.get(domain) : [])

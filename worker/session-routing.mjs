@@ -19,32 +19,65 @@ export function bindStructuredPane(store, paneKey) {
 
 export class SessionRouting {
   endpoints = new Map()
+  panes = new Map()
+  observations = new Map()
+  placements = new Map()
 
   constructor(store) {
     this.store = store
-    const evidence = new Map()
+    // An agent's latest pane is navigation metadata, not its historical placement.
+    for (const agent of store.agents.values()) {
+      this.panes.set(agent.id, new Set(agent.paneKey ? [agent.paneKey] : []))
+    }
+    for (const point of store.points.values()) {
+      if (point.paneKey) this.panes.get(point.agentId)?.add(point.paneKey)
+      const key = `${point.agentId}:${point.at}`
+      const panes = this.placements.get(key) ?? new Set()
+      if (point.paneKey) panes.add(point.paneKey)
+      this.placements.set(key, panes)
+      if (['live', 'status-cache', 'transcript', 'journal'].includes(point.source)) {
+        const points = this.observations.get(point.agentId) ?? []
+        points.push(point)
+        this.observations.set(point.agentId, points)
+      }
+    }
     for (const point of store.points.values()) {
       if (!['status-cache', 'transcript', 'journal'].includes(point.source)) {
         continue
       }
-      const points = evidence.get(point.agentId) ?? []
-      points.push(point)
-      evidence.set(point.agentId, points)
-    }
-    for (const agent of store.agents.values()) {
-      if (!agent.providerSessionId && !agent.sessionId) {
+      const agent = store.agents.get(point.agentId)
+      if (!agent?.providerSessionId && !agent?.sessionId) {
         continue
       }
-      for (const address of [agent.terminalHandle, agent.paneKey && `pane:${agent.paneKey}`]) {
+      const paneKey = this.paneFor(point)
+      const handle =
+        point.terminalHandle ??
+        (this.panes.get(agent.id)?.size <= 1 ? agent.terminalHandle : undefined)
+      for (const address of [handle, paneKey && `pane:${paneKey}`]) {
         if (!address) {
           continue
         }
         const owners = this.endpoints.get(address) ?? []
-        const points = evidence.get(agent.id) ?? []
-        owners.push({ id: agent.id, times: points.map((point) => point.at), points })
+        let owner = owners.find((candidate) => candidate.id === agent.id)
+        if (!owner) {
+          owner = { id: agent.id, times: [], points: [] }
+          owners.push(owner)
+        }
+        owner.times.push(point.at)
+        owner.points.push(point)
         this.endpoints.set(address, owners)
       }
     }
+  }
+
+  paneFor(point) {
+    if (point.paneKey) return point.paneKey
+    // v0.1.5 status points lacked placement. Recover only unambiguous evidence:
+    // the matching live observation, or a conversation seen in just one pane.
+    const matches = this.placements.get(`${point.agentId}:${point.at}`)
+    if (matches?.size === 1) return [...matches][0]
+    const panes = this.panes.get(point.agentId)
+    return panes?.size === 1 ? [...panes][0] : undefined
   }
 
   owner(handle, paneKey, at) {
@@ -147,22 +180,30 @@ export class SessionRouting {
 
   repairLivePoints() {
     for (const point of this.store.points.values()) {
-      if (point.source !== 'live') {
+      if (!['live', 'status-cache'].includes(point.source)) {
         continue
       }
       const agent = this.store.agents.get(point.agentId)
-      const paneKey = point.paneKey ?? agent?.paneKey
-      const owner = this.owner(agent?.terminalHandle, paneKey, point.at)
-      if (owner) {
+      const paneKey = this.paneFor(point)
+      const owner = this.owner(point.terminalHandle, paneKey, point.at)
+      if (owner && point.source === 'live') {
         point.agentId = owner
       }
       const changes = (this.endpoints.get(`pane:${paneKey}`) ?? [])
         .filter((candidate) => candidate.id !== point.agentId)
         .flatMap((candidate) => candidate.times)
         .filter((time) => time > point.at)
-      if (changes.length && Number.isFinite(point.until)) {
-        point.ownershipUntil = Math.min(...changes)
-        point.until = Math.min(point.until, point.ownershipUntil)
+      const workspace = (point.workspace ?? agent?.workspace)?.replace(/^worktree:/, '')
+      const closedAt = this.store.terminalClosures.get(`${workspace}:${paneKey?.split(':')[0]}`)
+      if (Number.isFinite(closedAt) && closedAt >= point.at) changes.push(closedAt)
+      if (point.source === 'live') {
+        for (const candidate of this.observations.get(point.agentId) ?? []) {
+          if (candidate.at > point.at && candidate.state !== point.state) changes.push(candidate.at)
+        }
+      }
+      if (changes.length) {
+        point.ownershipUntil = Math.min(point.ownershipUntil ?? Infinity, ...changes)
+        point.until = Math.min(point.until ?? Infinity, point.ownershipUntil)
       }
     }
   }

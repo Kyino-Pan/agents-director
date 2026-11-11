@@ -185,6 +185,10 @@ The trusted worker reads, without modifying source databases:
   not presented as proof that a model understood or acted on a message.
 - `agent.status.changed`: live main-agent states (fallback to the pane aggregate on older hosts).
   Live timestamps use local receipt time so remote clock drift does not move the live cursor.
+- The saved profile catalog supplies explicit terminal-tab closure timestamps. These bound
+  live observations, including older recorder-cache entries; closure leaves subsequent time
+  unknown and does not resolve a pending approval. Pane ownership is recorded per observation
+  so moving a conversation or reusing a pane cannot move its earlier activity to another session.
 
 The worker imports logs, then refreshes source files every five seconds while continuing to accept
 live events. Turns with known start/end observations become intervals. Assignment alone never

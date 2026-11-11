@@ -161,8 +161,10 @@ export function importStatusRow(store, paneKey, row, now) {
   const task = payload.orchestration ?? row.orchestration
   const taskName = clean(task?.displayName) ?? clean(task?.taskTitle)
   const title = clean(payload.terminalTitle ?? row.terminalTitle)
+  const identity = native ? `native:${provider}:${native}` : `pane:${paneKey}`
+  const previousPane = store.agents.get(store.aliases.get(identity) ?? identity)?.paneKey
   const id = store.agent(
-    native ? `native:${provider}:${native}` : `pane:${paneKey}`,
+    identity,
     {
       label: taskName ?? title ?? `${provider} · ${native?.slice(0, 8) ?? paneKey.slice(-8)}`,
       labelSource: taskName ? 'task' : title ? 'terminal' : 'fallback',
@@ -206,28 +208,44 @@ export function importStatusRow(store, paneKey, row, now) {
   const main = payload.mainAgent
   const at = timestamp(main?.stateStartedAt ?? row.stateStartedAt ?? row.receivedAt)
   const observed = timestamp(row.evidenceObservedAt ?? row.receivedAt) ?? at
-  if (at !== null) {
-    store.point(
-      `status:${id}:${at}`,
-      id,
-      at,
-      main?.state ?? payload.state,
-      'status-cache',
-      observed
+  const point = (start, state, until) => {
+    if (start === null) return
+    const key = `status:${paneKey}:${id}:${start}`
+    const legacy = store.points.get(`status:${id}:${start}`)
+    if (legacy && !legacy.paneKey) {
+      const panes = new Set(
+        [
+          previousPane,
+          ...[...store.points.values()].filter((p) => p.agentId === id).map((p) => p.paneKey)
+        ].filter(Boolean)
+      )
+      if (panes.size === 1) legacy.paneKey = [...panes][0]
+    }
+    const migrate = legacy?.paneKey === paneKey
+    const ownershipUntil = Math.min(
+      store.points.get(key)?.ownershipUntil ?? Infinity,
+      migrate ? (legacy.ownershipUntil ?? Infinity) : Infinity
     )
+    if (migrate) store.points.delete(legacy.id)
+    store.point(key, id, start, state, 'status-cache', until)
+    const saved = store.points.get(key)
+    if (saved) {
+      Object.assign(saved, {
+        paneKey,
+        terminalHandle: clean(row.terminalHandle),
+        workspace: clean(row.worktreeId)
+      })
+      // Re-reading a stale cache cannot revoke an already established boundary.
+      if (Number.isFinite(ownershipUntil)) {
+        saved.ownershipUntil = ownershipUntil
+        saved.until = Math.min(saved.until ?? Infinity, ownershipUntil)
+      }
+    }
   }
+  point(at, main?.state ?? payload.state, observed)
   for (const entry of row.stateHistory ?? payload.stateHistory ?? []) {
     const start = timestamp(entry.mainAgent?.stateStartedAt ?? entry.startedAt)
-    if (start !== null) {
-      store.point(
-        `status:${id}:${start}`,
-        id,
-        start,
-        entry.mainAgent?.state ?? entry.state,
-        'status-cache',
-        timestamp(entry.observedAt) ?? observed
-      )
-    }
+    point(start, entry.mainAgent?.state ?? entry.state, timestamp(entry.observedAt) ?? observed)
   }
   for (const child of payload.subagents ?? []) {
     importJournalChild(store, id, child, observed ?? now, now)
@@ -360,6 +378,7 @@ export class OrcaLogReader {
 
   async scan(now = Date.now()) {
     this.store.projectCatalog.clear()
+    this.store.terminalClosures.clear()
     const catalogs = new Map()
     for (const directory of this.directories) {
       const tabWorkspaces = await readProjectCatalog(this, directory)
