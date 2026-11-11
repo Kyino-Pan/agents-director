@@ -123,6 +123,7 @@ export function timestamp(value) {
 export class ActivityStore {
   agents = new Map()
   projectCatalog = new Map()
+  terminalClosures = new Map()
   aliases = new Map()
   points = new Map()
   messages = new Map()

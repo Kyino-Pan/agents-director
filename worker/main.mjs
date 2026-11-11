@@ -70,13 +70,18 @@ export default async function activate(orca) {
     )
     const state = event.mainAgent?.state ?? event.state
     const previous = live.get(event.paneKey)
-    if (previous?.state === state && previous.agentId === id) {
+    if (
+      previous?.state === state &&
+      previous.agentId === id &&
+      event.mainAgent &&
+      previous.stateStartedAt === event.mainAgent.stateStartedAt
+    ) {
       return
     }
     if (previous) {
       const point = store.points.get(previous.key)
       if (point) {
-        point.until = at
+        point.until = Math.min(at, point.ownershipUntil ?? at)
       }
     }
     const key = `live:${event.paneKey}:${at}`
@@ -84,8 +89,15 @@ export default async function activate(orca) {
     const point = store.points.get(key)
     if (point) {
       point.paneKey = event.paneKey
+      point.terminalHandle = event.terminalId
+      point.workspace = event.workspaceId ?? event.worktreeId
     }
-    live.set(event.paneKey, { key, state, agentId: id })
+    live.set(event.paneKey, {
+      key,
+      state,
+      agentId: id,
+      stateStartedAt: event.mainAgent?.stateStartedAt
+    })
     orca.panels.post('activity.changed', { at })
   }
   const subscription = orca.events.on('agent.status.changed', receive)
