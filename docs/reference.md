@@ -115,9 +115,10 @@ the handle and checks conversation ownership again. Historical pane aliases alon
 prove ownership: a reused pane cannot open its successor by mistake. Navigation is disabled
 for imported data directories and browser previews.
 
-A closed local Codex or Claude CLI conversation with an explicitly recorded provider session,
-workspace and local execution host can use `terminal.ensureAgentSession` with `resumeOrigin:
-saved`. Orca owns resume command construction and conversation claims; the plugin sends no
+A closed local conversation from any of the 26 audited Orca-native resumable CLI harnesses,
+with an explicitly recorded provider identity, workspace and local execution host, can use
+`terminal.ensureAgentSession` with `resumeOrigin: saved`. Orca owns resume command construction
+and conversation claims; the plugin sends no
 shell command, fresh-agent request or prompt. The original workspace must still resolve on
 the original host and its directory must exist. A missing or incomplete inventory, ambiguous
 owner or disconnected process is refused rather than treated as closed. Host capability checks
@@ -125,7 +126,25 @@ must advertise both host authority and saved-resume support. Remote CLI resume i
 Windows CLI resume is refused because hook records do not establish the original native/WSL
 route. Existing verifiable terminal navigation still works on those platforms and hosts.
 Internal model subagents without a separate recorded standalone identity cannot be resumed.
-Other CLI providers currently show an unsupported-provider reason.
+The supported harnesses are Claude, CodeBuddy, Codex, Qoder, Qoder CN, Qwen Code, Gemini,
+Antigravity, OpenCode, OpenCode2, Pi, Mimo Code, Droid, Grok, Devin, OMP, Prime Agent,
+Copilot, Cursor, Kimi, Muse, ZCode, DSH, JCode, Kiro and Hermes. The execution host must also
+support the selected harness; unrecognized providers remain refused.
+
+Cursor and Antigravity require `conversation_id`; the others use `session_id`. Pi and Prime
+Agent additionally require their explicitly recorded absolute `transcriptPath`, which is part
+of their ownership identity. OMP forwards its recorded transcript locator when available,
+otherwise its ID; native host settings own launch configuration. Recorded transcript paths
+and Claude effort survive the recorder cache and are sent as metadata, never as shell text.
+No transcript path is inferred from an ID or accepted from the panel. Missing historical file
+metadata cannot be recovered by starting a fresh session. IDs follow the native contract
+(up to 512 characters, no controls, surrounding whitespace or leading hyphen), including
+punctuation and Unicode that the host handles as arguments.
+
+The native ensure RPC does not accept recorded `cwd`. The collector retains that evidence;
+when it differs from the original workspace directory, resume is refused because this API
+cannot preserve it. This matters for work-directory-scoped harnesses such as Kimi and DSH.
+Existing verified live owners can still be opened without a resume mutation.
 
 Native Chat remains a Chat. An open tab is found by exact Orca session ID. A closed Chat uses
 `agentSession.reveal` to republish that same saved conversation, after verifying its recorded

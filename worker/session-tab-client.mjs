@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { readSourceText } from './source-files.mjs'
 import { runtimeEndpoint, validateRuntimeSocket } from './runtime-endpoint.mjs'
 import { prepareResume } from './session-resume.mjs'
+import { validProviderSession } from './terminal-resume-policy.mjs'
 
 const keysAre = (value, keys) =>
   value &&
@@ -35,10 +36,7 @@ function validateResumeRequest(method, params) {
       [...params.worktree].every(
         (character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127
       ) &&
-      ['codex', 'claude'].includes(params.agent) &&
-      keysAre(params.providerSession, ['key', 'id']) &&
-      params.providerSession.key === 'session_id' &&
-      identity(params.providerSession.id) &&
+      validProviderSession(params.agent, params.providerSession) &&
       params.presentation === 'background'
     )
   }

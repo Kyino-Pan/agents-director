@@ -1,5 +1,10 @@
 import { stat } from 'node:fs/promises'
-import { isAbsolute } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
+import {
+  recordedCwd,
+  terminalProviderSession,
+  validProviderSession
+} from './terminal-resume-policy.mjs'
 
 export const workspaceOf = (agent) => agent.workspace?.replace(/^worktree:/, '')
 
@@ -31,7 +36,7 @@ export function resumeIdentity(agent, kind) {
   }
   if (
     kind === 'terminal' &&
-    (!['codex', 'claude'].includes(target.provider) || target.providerSessionKey !== 'session_id')
+    !validProviderSession(target.provider, terminalProviderSession(target))
   ) {
     throw new Error('This provider has no supported terminal resume identity in Agents Director.')
   }
@@ -73,6 +78,15 @@ export async function prepareResume(agent, kind, request, checkDirectory = stat)
     (await checkDirectory(worktree.path).catch(() => null))?.isDirectory()
   if (!exists) {
     throw new Error('The original workspace directory is no longer available.')
+  }
+  // The native ensure RPC does not accept cwd. Never silently resume a work-dir-scoped
+  // conversation in a different folder, nor construct a shell cd workaround.
+  if (
+    kind === 'terminal' &&
+    target.cwd !== undefined &&
+    (!recordedCwd(target.cwd) || resolve(target.cwd) !== resolve(worktree.path))
+  ) {
+    throw new Error('The recorded working directory cannot be preserved by this Orca resume API.')
   }
   return target
 }
