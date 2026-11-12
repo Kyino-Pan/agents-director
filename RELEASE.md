@@ -1,3 +1,13 @@
+# v0.1.7 prepared change
+
+Saved terminal resume supports all 26 audited Orca-native resumable harnesses through the
+existing saved-session host authority. Cursor/Antigravity conversation IDs, Pi/Prime Agent
+session-file identity, OMP locators and recorded effort are preserved through collection and
+cache restore. Commands, launch settings and ownership remain host-controlled, and capabilities
+are unchanged. Missing required identity, uncertain owners, unsupported execution routes and
+recorded working directories the native RPC cannot preserve remain refused. Independent
+acceptance and release publication are separate from this preparation.
+
 # v0.1.0 release checks
 
 Prepared 2026-11-03 from the local Orca Agent Activity implementation at

@@ -8,6 +8,7 @@ import { readProjectCatalog } from './project-catalog-reader.mjs'
 import { readOrchestration } from './orchestration-reader.mjs'
 import { bindStructuredPane, SessionRouting } from './session-routing.mjs'
 import { JournalOutcomeReader } from './journal-outcome-reader.mjs'
+import { fileResumeProvider, recordedResumeMetadata } from './terminal-resume-policy.mjs'
 
 const PAGE_SIZE = 2000
 const MAX_LOG_BYTES = 32 * 1024 * 1024
@@ -161,7 +162,12 @@ export function importStatusRow(store, paneKey, row, now) {
   const task = payload.orchestration ?? row.orchestration
   const taskName = clean(task?.displayName) ?? clean(task?.taskTitle)
   const title = clean(payload.terminalTitle ?? row.terminalTitle)
-  const identity = native ? `native:${provider}:${native}` : `pane:${paneKey}`
+  const resumeMetadata = recordedResumeMetadata(session)
+  // Native Pi-family identity includes the saved file, even when two files share an ID.
+  const nativeIdentity = fileResumeProvider(provider)
+    ? JSON.stringify([native, resumeMetadata.transcriptPath ?? null])
+    : native
+  const identity = native ? `native:${provider}:${nativeIdentity}` : `pane:${paneKey}`
   const previousPane = store.agents.get(store.aliases.get(identity) ?? identity)?.paneKey
   const id = store.agent(
     identity,
@@ -177,6 +183,7 @@ export function importStatusRow(store, paneKey, row, now) {
               provider,
               providerSessionId: native,
               providerSessionKey: clean(session?.key),
+              ...resumeMetadata,
               workspace: clean(row.worktreeId)?.replace(/^worktree:/, ''),
               executionHostId:
                 row.connectionId === null

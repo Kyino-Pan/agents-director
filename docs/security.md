@@ -34,9 +34,9 @@ same user's privileges. The plugin still asks for Full access.
   socket address. Unix socket ownership and directory write permissions are checked before
   each request. Windows uses the exact local named pipe; filesystem mode checks are Unix-only.
 - Resume adds only the `status.get` and `worktree.show` reads and two identity-scoped runtime
-  mutations: `terminal.ensureAgentSession` (saved local Codex/Claude identity, background
+  mutations: `terminal.ensureAgentSession` (saved local native harness identity, background
   presentation) and `agentSession.reveal` (existing Orca Chat session ID). Their parameter shapes
-  are checked; commands, prompts, arbitrary transcript paths, account environment and fresh-agent
+  are checked by one shared provider/key/metadata policy; commands, prompts, panel-supplied paths, account environment and fresh-agent
   creation are rejected. These calls can create a terminal process for a saved conversation or
   republish a saved Chat tab. They do not add a Host API capability; the existing full-access
   trusted worker authenticates to the same-user runtime. This is a real mutation boundary, not
@@ -45,6 +45,12 @@ same user's privileges. The plugin still asks for Full access.
   record and an existing directory. Remote and WSL resume routes are refused; Windows CLI
   resume is refused when the hook identity cannot distinguish its original route. Internal
   subagents without a standalone identity cannot be promoted to terminal agents.
+- Native terminal resume retains only recorded transcript path, working directory and effort
+  metadata alongside identity. Pi/Prime Agent require an absolute saved-file locator and match
+  ownership by file as well as ID; OMP uses its recorded locator or ID. Paths are never derived
+  from IDs. The host owns launch settings and commands; old launch args/env are not copied.
+  A recorded working directory differing from the workspace is refused because the current
+  native ensure RPC cannot carry it. Malformed metadata is refused instead of silently dropped.
 - RPC methods are allowlisted, responses must match both request and runtime identity, total
   response bytes are capped at 1 MiB and requests time out. Tokens are never sent to the panel,
   stored in the history cache or logged.

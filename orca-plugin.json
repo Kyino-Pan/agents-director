@@ -4,7 +4,7 @@
   "execution": "trusted-worker",
   "id": "agent-activity",
   "name": "Agents Director",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "A rolling 7-day agent timeline reconstructed from Orca logs, with live status updates and orchestration message arrows.",
   "engines": {
     "orca": ">=1.4.246"

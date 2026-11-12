@@ -2,6 +2,11 @@ import { resolve } from 'node:path'
 import { defaultDataDirectory } from './orca-log-reader.mjs'
 import { createSessionTabClient, navigateSessionTab } from './session-tab-client.mjs'
 import { prepareResume, workspaceOf } from './session-resume.mjs'
+import {
+  fileResumeProvider,
+  providerSessionKey,
+  terminalProviderSession
+} from './terminal-resume-policy.mjs'
 
 const runCli = async (args) => {
   const { runTerminalCli } = await import('../dist/terminal-cli.mjs').catch(() => {
@@ -14,7 +19,13 @@ const ownsConversation = (tab, agent) =>
   tab.type === 'terminal' &&
   tab.agentStatus?.agentType === agent.provider &&
   tab.agentStatus?.providerSession?.id === agent.providerSessionId &&
-  tab.agentStatus?.providerSession?.key === (agent.resumeTarget?.providerSessionKey ?? 'session_id')
+  tab.agentStatus?.providerSession?.key ===
+    (agent.resumeTarget?.providerSessionKey ??
+      providerSessionKey(agent.provider) ??
+      'session_id') &&
+  (!fileResumeProvider(agent.provider) ||
+    (agent.resumeTarget?.transcriptPath &&
+      tab.agentStatus?.providerSession?.transcriptPath === agent.resumeTarget.transcriptPath))
 
 const isLive = (terminal) =>
   terminal.connected &&
@@ -86,7 +97,9 @@ export function createTerminalNavigator(
     const identity = JSON.stringify([
       workspaceOf(agent),
       agent.provider,
-      agent.sessionId ?? agent.providerSessionId
+      agent.sessionId ?? agent.providerSessionId,
+      agent.resumeTarget?.providerSessionKey,
+      fileResumeProvider(agent.provider) ? agent.resumeTarget?.transcriptPath : undefined
     ])
     const beforeResume = () => {
       if (resumeAttempts.has(identity)) {
@@ -162,7 +175,7 @@ export function createTerminalNavigator(
           resumeOrigin: 'saved',
           worktree: `id:${target.workspace}`,
           agent: target.provider,
-          providerSession: { key: target.providerSessionKey, id: target.providerSessionId },
+          providerSession: terminalProviderSession(target),
           presentation: 'background'
         })
         if (
@@ -177,7 +190,12 @@ export function createTerminalNavigator(
         // A launch receipt alone does not prove conversation ownership.
         inventory = await currentInventory(agent, request)
         terminal = inventory.terminal
-        if (!terminal || terminal.handle !== result.terminal.handle || !isLive(terminal)) {
+        if (
+          !terminal ||
+          terminal.handle !== result.terminal.handle ||
+          terminal.executionHostId !== target.executionHostId ||
+          !isLive(terminal)
+        ) {
           throw new Error(
             'Resume was requested, but its conversation ownership is not confirmed yet. Open the original workspace in Orca.'
           )
