@@ -196,7 +196,8 @@ The trusted worker reads, without modifying source databases:
   latest published item values and deletions over any inline prefix, and skips unchanged outcome
   data. Unsupported formats appear as limited source coverage. Open turns stop at their saved
   observation time; they do not prove continuous work up to the present.
-- `agent-hooks/last-status.json`: pane/session correlation and recent state observations. This is
+- `agent-hooks/last-status.db` (Orca 1.4.257+, schema 202), or the legacy `last-status.json`
+  when no database exists: pane/session correlation and recent state observations. This is
   a cache, not a full historical log. Its provider transcript paths select local Codex/Claude
   JSONL files for incremental parsing; the plugin never scans unrelated home-directory sessions.
 - `orchestration.db`: saved Runs, dispatch lineage and messages. Messages are matched to agent
@@ -221,7 +222,8 @@ restart. A crash may lose the last unsaved live observations; offline time is no
 
 Bounded readers process 2,000 journal rows per pass, a 32 MiB tail per referenced transcript, and
 up to 3,000 messages / 1,000 dispatches per source. Storage keeps at most 5,000 points and 5,000
-messages, with a 1.8 MiB serialized recorder-cache budget. Dense windows can exceed these bounds;
+messages, with a 1.8 MiB compressed recorder-cache budget (32 MiB decoded). Legacy uncompressed
+caches are migrated on the next successful save. Dense windows can exceed these bounds;
 the view explicitly reports partial coverage. Snapshot drawing is capped at 160 lanes, 4,000
 segments and 600 messages; message previews are capped at 400 characters.
 

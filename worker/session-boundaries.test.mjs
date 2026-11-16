@@ -8,6 +8,7 @@ import { ActivityStore } from './activity-store.mjs'
 import { importStatusRow } from './orca-log-reader.mjs'
 import { SessionRouting } from './session-routing.mjs'
 import activate, { deactivate } from './main.mjs'
+import { decodeRecorderCache } from './recorder-cache.mjs'
 
 const NOW = Date.parse('2026-11-11T13:00:00Z')
 const time = (value) => Date.parse(`2026-11-11T${value}Z`)
@@ -75,10 +76,11 @@ async function collector(context, saved) {
     snapshot: () => handlers.get('activity.snapshot')({ hideShortTasks: false }),
     saved: () => {
       const head = storage.get('activity-v1:head')
-      return JSON.parse(
+      return decodeRecorderCache(
+        head,
         Array.from({ length: head.chunks }, (_, i) =>
           storage.get(`activity-v1:${head.generation}:${i}`)
-        ).join('')
+        )
       )
     }
   }

@@ -2,13 +2,14 @@ import { DatabaseSync } from 'node:sqlite'
 import { stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, isAbsolute, resolve, extname } from 'node:path'
-import { sourceFilePath, openSourceFile, readSourceText } from './source-files.mjs'
+import { sourceFilePath, openSourceFile } from './source-files.mjs'
 import { WINDOW_MS, timestamp } from './activity-store.mjs'
 import { readProjectCatalog } from './project-catalog-reader.mjs'
 import { readOrchestration } from './orchestration-reader.mjs'
 import { bindStructuredPane, SessionRouting } from './session-routing.mjs'
 import { JournalOutcomeReader } from './journal-outcome-reader.mjs'
 import { fileResumeProvider, recordedResumeMetadata } from './terminal-resume-policy.mjs'
+import { readStatusCache } from './status-cache-reader.mjs'
 
 const PAGE_SIZE = 2000
 const MAX_LOG_BYTES = 32 * 1024 * 1024
@@ -393,21 +394,15 @@ export class OrcaLogReader {
         this.journal(directory, now)
       )
       catalogs.set(directory, tabWorkspaces)
-      const statusPath = join(directory, 'agent-hooks', 'last-status.json')
-      await this.scanSource(statusPath, async () => {
-        const contents = await readSourceText(statusPath, [directory], MAX_LOG_BYTES)
-        const status = JSON.parse(contents)
-        for (const [pane, row] of Object.entries(status.entries ?? {})) {
-          const transcript = importStatusRow(this.store, pane, row, now)
-          if (transcript) {
-            this.transcripts.set(transcript.path, {
-              ...this.transcripts.get(transcript.path),
-              ...transcript,
-              directory
-            })
-          }
+      await readStatusCache(this, directory, (pane, row) => {
+        const transcript = importStatusRow(this.store, pane, row, now)
+        if (transcript) {
+          this.transcripts.set(transcript.path, {
+            ...this.transcripts.get(transcript.path),
+            ...transcript,
+            directory
+          })
         }
-        return `${Object.keys(status.entries ?? {}).length} cached panes; cache alone does not prove live activity`
       })
     }
     for (const transcript of this.transcripts.values()) {
