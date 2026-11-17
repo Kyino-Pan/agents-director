@@ -82,7 +82,7 @@ export class DetailInputs {
       note.textContent = result.loading
         ? 'Loading recent inputs…'
         : result.unavailable
-          ? 'Recent user inputs unavailable.'
+          ? result.reason || 'Recent user inputs unavailable.'
           : result.limited
             ? 'Only inputs in the bounded source tail are available.'
             : 'No recorded user inputs.'

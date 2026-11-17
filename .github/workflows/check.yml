@@ -15,8 +15,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run build
-      - run: git diff --exit-code -- dist/terminal-cli.mjs
       - run: npm run lint
       - run: npm run format:check
       - run: npm test

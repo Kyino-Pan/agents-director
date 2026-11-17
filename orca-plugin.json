@@ -4,10 +4,10 @@
   "execution": "trusted-worker",
   "id": "agent-activity",
   "name": "Agents Director",
-  "version": "0.1.7",
-  "description": "A rolling 7-day agent timeline reconstructed from Orca logs, with live status updates and orchestration message arrows.",
+  "version": "0.2.0",
+  "description": "A rolling seven-day timeline of publicly observed Orca agent states and session summaries.",
   "engines": {
-    "orca": ">=1.4.246"
+    "orca": ">=1.4.260"
   },
   "pluginApi": 1,
   "main": "worker/main.mjs",
@@ -40,22 +40,12 @@
     "commands": [
       {
         "id": "refresh",
-        "title": "Agents Director: Refresh logs"
+        "title": "Agents Director: Refresh activity"
       }
     ],
     "events": [
       {
         "on": "agent.status.changed"
-      }
-    ],
-    "settings": [
-      {
-        "key": "dataDirectories",
-        "title": "Orca data directories",
-        "type": "string",
-        "multiline": true,
-        "description": "One absolute path per line. Leave empty for this computer's default Orca profile. Add profile directories or read-only mounted copies from another host to import their logs.",
-        "default": ""
       }
     ]
   },
@@ -64,10 +54,19 @@
       "kind": "agent:read"
     },
     {
-      "kind": "storage:own"
+      "kind": "workspace:read"
     },
     {
-      "kind": "settings:own"
+      "kind": "history:read"
+    },
+    {
+      "kind": "workspace:write"
+    },
+    {
+      "kind": "agent:launch"
+    },
+    {
+      "kind": "storage:own"
     }
   ],
   "repository": "https://github.com/Kyino-Pan/agents-director",
@@ -79,17 +78,17 @@
   },
   "cover": {
     "path": "assets/cover.png",
-    "alt": "Synthetic Agents Director timeline: named agents grouped by project/worktree, activity bars, spawn/message arrows and a focused 10:10–10:25 window."
+    "alt": "Synthetic illustration of the Agents Director timeline. Relationship arrows are illustrative and unavailable through the public plugin API."
   },
   "screenshots": [
     {
       "path": "assets/light.png",
-      "alt": "Light timeline with synthetic agent states, spawn branches and message arrows",
+      "alt": "Legacy synthetic timeline illustration; relationship arrows are unavailable through the public plugin API.",
       "theme": "light"
     },
     {
       "path": "assets/dark.png",
-      "alt": "Dark timeline with synthetic agent states, spawn branches and message arrows",
+      "alt": "Legacy synthetic timeline illustration; relationship arrows are unavailable through the public plugin API.",
       "theme": "dark"
     }
   ]

@@ -44,13 +44,7 @@ export function installActivityActions(getSnapshot) {
     selectedAgent = agentAt(target)
     returnFocus = target.closest('[data-agent]') || document.activeElement
     navigate.hidden = !selectedAgent
-    navigate.textContent =
-      selectedAgent?.sessionId &&
-      (selectedAgent.resumeTarget?.kind === 'chat' ||
-        !selectedAgent.terminalHandle ||
-        selectedAgent.paneKey?.startsWith('structured-agent-session-'))
-        ? 'Open or resume Chat'
-        : 'Open or resume terminal'
+    navigate.textContent = 'Open or resume terminal'
     navigate.disabled = pending
     menu.showPopover()
     menu.style.left = `${Math.max(4, Math.min(x, innerWidth - menu.offsetWidth - 4))}px`

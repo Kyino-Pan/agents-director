@@ -256,6 +256,9 @@ export class ActivityStore {
       return {}
     }
     seen.add(agent.id)
+    if (agent.projectId && agent.projectName) {
+      return { projectId: agent.projectId, projectName: agent.projectName }
+    }
     const workspace = agent.workspace?.replace(/^worktree:/, '')
     if (workspace) {
       const repoId = workspace.includes('::') ? workspace.split('::')[0] : null

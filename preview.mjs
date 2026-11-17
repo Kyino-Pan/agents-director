@@ -2,36 +2,11 @@ import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
-import { RecentInputs } from './worker/recent-inputs.mjs'
-import { ActivityStore } from './worker/activity-store.mjs'
-import { OrcaLogReader, defaultDataDirectory } from './worker/orca-log-reader.mjs'
+import { snapshot as fixture } from './panel.fixture.mjs'
 
-// A loopback preview lets older Orca builds show the real log-backed view before they gain plugin API 1.2.
-export async function startPreview({ directories = [defaultDataDirectory()], port = 0 } = {}) {
-  const store = new ActivityStore()
-  const reader = new OrcaLogReader(store, directories)
-  const recentInputs = new RecentInputs(reader)
+// Browser previews use synthetic data; real observations are available only inside Orca.
+export async function startPreview({ port = 0 } = {}) {
   const root = `/${randomUUID()}/`
-  let scan = Promise.resolve()
-  let closing = false
-  const refresh = () => {
-    scan = scan
-      .catch(() => {})
-      .then(async () => {
-        if (closing) {
-          return
-        }
-        await reader.scan()
-        store.prune()
-        store.source(
-          'Preview mode',
-          'limited',
-          'Reads source logs every 5 seconds. Direct live plugin events require Orca >=1.4.246.'
-        )
-      })
-    return scan
-  }
-  await refresh()
   const assets = {
     '': ['panel.html', 'text/html; charset=utf-8'],
     'panel.css': ['panel.css', 'text/css; charset=utf-8'],
@@ -103,24 +78,31 @@ export async function startPreview({ directories = [defaultDataDirectory()], por
     const route = requestUrl.pathname.slice(root.length)
     try {
       if (route === 'inputs') {
-        await scan
         response.setHeader('content-type', 'application/json; charset=utf-8')
         response.end(
-          JSON.stringify(
-            await recentInputs.read({ agentId: requestUrl.searchParams.get('agentId') })
-          )
+          JSON.stringify({
+            agentId: requestUrl.searchParams.get('agentId'),
+            inputs: [],
+            unavailable: true,
+            reason: 'Synthetic preview: conversation text is unavailable.'
+          })
         )
         return
       }
       if (route === 'snapshot') {
-        await scan
         response.setHeader('content-type', 'application/json; charset=utf-8')
         response.end(
-          JSON.stringify(
-            store.snapshot(Date.now(), {
-              hideShortTasks: requestUrl.searchParams.get('hideShortTasks') !== 'false'
-            })
-          )
+          JSON.stringify({
+            ...fixture,
+            sources: [
+              {
+                name: 'Synthetic preview',
+                status: 'limited',
+                detail:
+                  'Illustration only. Relationship arrows and conversation text are unavailable through the public plugin API.'
+              }
+            ]
+          })
         )
         return
       }
@@ -156,34 +138,24 @@ export async function startPreview({ directories = [defaultDataDirectory()], por
     server.once('error', reject)
     server.listen(port, '127.0.0.1', resolve)
   })
-  const timer = setInterval(() => void refresh().catch(() => {}), 5000)
   return {
     url: `http://127.0.0.1:${server.address().port}${root}`,
     async close() {
-      closing = true
-      clearInterval(timer)
-      await scan
-      reader.close()
       await new Promise((resolve) => server.close(resolve))
     }
   }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const directories = []
   let port = 0
   for (let index = 2; index < process.argv.length; index++) {
-    if (process.argv[index] === '--data-dir' && process.argv[index + 1]) {
-      directories.push(process.argv[++index])
-    } else if (process.argv[index] === '--port' && process.argv[index + 1]) {
+    if (process.argv[index] === '--port' && process.argv[index + 1]) {
       port = Number(process.argv[++index])
     } else {
-      throw new Error(
-        'Usage: node preview.mjs [--data-dir <absolute Orca data path>] [--port <port>]'
-      )
+      throw new Error('Usage: node preview.mjs [--port <port>]')
     }
   }
-  const preview = await startPreview({ ...(directories.length ? { directories } : {}), port })
+  const preview = await startPreview({ port })
   console.log(preview.url)
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.once(signal, () => void preview.close())
