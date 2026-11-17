@@ -132,3 +132,9 @@ resume/focus errors and storage restore. Resume/focus calls are mocked. Browser
 tests cover rendering and controls at desktop and narrow widths. Plugin validation
 and checks do not prove live provider resume or all native platforms. No checks
 should start or resume a real conversation without a deliberate navigation action.
+
+The `validate-plugin` CI job runs Orca's official `validate:plugin` against a clean
+plugin checkout using the pinned v1.4.260 source revision and Node 24. It follows the
+official catalog CI's JavaScript-only dependency setup (`--ignore-scripts`), without
+building or launching Electron. The main test job still exercises Node 22. Update
+the validator revision deliberately when adopting newer host APIs.

@@ -20,4 +20,6 @@ from Orca commit `647207aae1cc2652bccd3c87352e19c36c69a0b9`, using:
 The generator renders Orca's own `AgentIcon` for every supported harness and embeds
 its image assets for offline use. Agent names and logos belong to their respective
 owners. Regenerate with `node scripts/sync-orca-harness-icons.mjs <Orca checkout>`;
-React is used only by this development tool, not by the plugin at runtime.
+Use a checkout at the recorded source revision when regenerating; newer upstream
+catalog formats or network-only artwork may be incompatible and are refused before
+writing assets. React is used only by this development tool, not by the plugin at runtime.
