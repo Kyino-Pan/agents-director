@@ -12,7 +12,9 @@ same user's privileges. The plugin still asks for Full access.
   providers' standard transcript directories (`sessions`, `archived_sessions`, `projects`).
   Imported data cannot nominate arbitrary files elsewhere on this computer. Custom transcript
   locations outside these roots are unavailable; there is no extra-directory grant setting.
-- Status JSON is capped at 32 MiB before reading; profile indexes and runtime metadata at
+- Status JSON and SQLite entry payloads are capped at 32 MiB before reading; the SQLite reader
+  accepts schema 202 only, at most 10,000 panes, in a read-only transaction. A present database
+  takes precedence over leftover JSON, including when unreadable or unsupported. Profile indexes and runtime metadata at
   64 KiB. Transcript reads are bounded to 32 MiB per pass.
 - Recent user inputs are a read-only, on-demand detail request accepting only a canonical agent ID.
   The worker resolves a directly recorded Codex/Claude transcript or unique native Chat journal;

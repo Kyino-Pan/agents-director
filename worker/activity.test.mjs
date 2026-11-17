@@ -487,7 +487,7 @@ test('collector records live changes, persists on shutdown, and restores history
   assert.equal((await handlers.get('activity.snapshot')()).agents.length, 0)
   await deactivate()
   assert.equal(disposed, 1)
-  assert.equal(storage.get('activity-v1:head').version, 1)
+  assert.equal(storage.get('activity-v1:head').version, 2)
   await activate(api)
   snapshot = await handlers.get('activity.snapshot')({ hideShortTasks: false })
   assert.equal(

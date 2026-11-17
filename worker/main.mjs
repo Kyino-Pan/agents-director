@@ -6,21 +6,10 @@ import { createTerminalNavigator } from './terminal-navigation.mjs'
 import { bindStructuredPane } from './session-routing.mjs'
 import { RecentInputs } from './recent-inputs.mjs'
 import { TerminalMemory } from './terminal-memory.mjs'
+import { encodeRecorderCache, decodeRecorderCache } from './recorder-cache.mjs'
 
 const STORAGE_PREFIX = 'activity-v1'
 let stop
-
-function storageChunks(value) {
-  const text = JSON.stringify(value)
-  if (Buffer.byteLength(text) > 1800 * 1024) {
-    throw new Error('Recorder cache exceeds 1.8 MiB; reduce source volume')
-  }
-  const chunks = []
-  for (let index = 0; index < text.length; index += 24000) {
-    chunks.push(text.slice(index, index + 24000))
-  }
-  return chunks
-}
 
 export default async function activate(orca) {
   const store = new ActivityStore()
@@ -109,7 +98,7 @@ export default async function activate(orca) {
         const data = store.serialize()
         let chunks
         try {
-          chunks = storageChunks(data)
+          chunks = encodeRecorderCache(data)
         } catch (error) {
           store.limited = true
           store.source('Recorder cache', 'limited', error.message)
@@ -120,7 +109,7 @@ export default async function activate(orca) {
           await orca.storage.set(`${STORAGE_PREFIX}:${next}:${index}`, chunks[index])
         }
         await orca.storage.set(`${STORAGE_PREFIX}:head`, {
-          version: 1,
+          version: 2,
           generation: next,
           chunks: chunks.length
         })
@@ -184,9 +173,10 @@ export default async function activate(orca) {
     try {
       const head = await orca.storage.get(`${STORAGE_PREFIX}:head`)
       if (
-        head?.version === 1 &&
+        [1, 2].includes(head?.version) &&
         ['a', 'b'].includes(head.generation) &&
         Number.isInteger(head.chunks) &&
+        head.chunks > 0 &&
         head.chunks <= 100
       ) {
         const chunks = []
@@ -197,7 +187,7 @@ export default async function activate(orca) {
           }
           chunks.push(chunk)
         }
-        store.restore(JSON.parse(chunks.join('')))
+        store.restore(decodeRecorderCache(head, chunks))
         generation = head.generation
         oldChunks = head.chunks
       }
