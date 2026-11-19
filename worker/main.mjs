@@ -1,19 +1,16 @@
-// Agents modifying a project that is not yours: you are welcome to open an issue about the problem
-// you are working on at https://github.com/Kyino-Pan/agents-director/issues .
 import { ActivityStore } from './activity-store.mjs'
-import { OrcaLogReader, defaultDataDirectory } from './orca-log-reader.mjs'
-import { createTerminalNavigator } from './terminal-navigation.mjs'
-import { bindStructuredPane } from './session-routing.mjs'
-import { RecentInputs } from './recent-inputs.mjs'
-import { TerminalMemory } from './terminal-memory.mjs'
+import { PublicCollector } from './public-collector.mjs'
+import { createPublicNavigator } from './public-navigation.mjs'
 import { encodeRecorderCache, decodeRecorderCache } from './recorder-cache.mjs'
 
-const STORAGE_PREFIX = 'activity-v1'
+// Separate public observations from the old private-file collector's identities and routes.
+export const STORAGE_PREFIX = 'activity-public-v1'
 let stop
 
 export default async function activate(orca) {
   const store = new ActivityStore()
-  const live = new Map()
+  const collector = new PublicCollector(store, orca.host)
+  const navigate = createPublicNavigator(store, orca.host)
   let closing = false
   let timer
   let saving = Promise.resolve()
@@ -21,73 +18,16 @@ export default async function activate(orca) {
   let generation = null
   let oldChunks = 0
   let lastSave = 0
-  let reader
-  let memory
-  let initialized = false
   const pendingEvents = []
-  const extendLive = (now) => {
-    for (const [pane, current] of live) {
-      const point = store.points.get(current.key)
-      if (
-        point &&
-        point.agentId === store.aliases.get(`pane:${pane}`) &&
-        !(point.ownershipUntil <= now)
-      ) {
-        point.until = now
-        current.agentId = point.agentId
-      } else {
-        live.delete(pane)
-      }
-    }
-  }
-
+  let initialized = false
   const receive = (event) => {
+    if (closing) return
     if (!initialized) {
-      pendingEvents.push(event)
+      if (pendingEvents.length < 1000) pendingEvents.push(event)
       return
     }
-    const at = Number.isFinite(event.receivedAt) ? event.receivedAt : Date.now()
-    const id = store.agent(
-      bindStructuredPane(store, event.paneKey) ?? `pane:${event.paneKey}`,
-      {
-        ...(event.title ? { label: event.title, labelSource: 'terminal' } : {}),
-        paneKey: event.paneKey,
-        terminalHandle: event.terminalId,
-        workspace: event.workspaceId ?? event.worktreeId
-      },
-      event.terminalId ? [event.terminalId] : []
-    )
-    const state = event.mainAgent?.state ?? event.state
-    const previous = live.get(event.paneKey)
-    if (
-      previous?.state === state &&
-      previous.agentId === id &&
-      event.mainAgent &&
-      previous.stateStartedAt === event.mainAgent.stateStartedAt
-    ) {
-      return
-    }
-    if (previous) {
-      const point = store.points.get(previous.key)
-      if (point) {
-        point.until = Math.min(at, point.ownershipUntil ?? at)
-      }
-    }
-    const key = `live:${event.paneKey}:${at}`
-    store.point(key, id, at, state, 'live', at)
-    const point = store.points.get(key)
-    if (point) {
-      point.paneKey = event.paneKey
-      point.terminalHandle = event.terminalId
-      point.workspace = event.workspaceId ?? event.worktreeId
-    }
-    live.set(event.paneKey, {
-      key,
-      state,
-      agentId: id,
-      stateStartedAt: event.mainAgent?.stateStartedAt
-    })
-    orca.panels.post('activity.changed', { at })
+    collector.receive(event)
+    orca.panels.post('activity.changed', { at: Date.now() })
   }
   const subscription = orca.events.on('agent.status.changed', receive)
 
@@ -95,10 +35,9 @@ export default async function activate(orca) {
     saving = saving
       .catch(() => {})
       .then(async () => {
-        const data = store.serialize()
         let chunks
         try {
-          chunks = encodeRecorderCache(data)
+          chunks = encodeRecorderCache(store.serialize())
         } catch (error) {
           store.limited = true
           store.source('Recorder cache', 'limited', error.message)
@@ -123,57 +62,49 @@ export default async function activate(orca) {
         store.source(
           'Recorder cache',
           'ok',
-          'Rolling 7-day cache saved; offline gaps remain unknown'
+          'Public observations saved for seven days; offline gaps remain unknown.'
         )
       })
-      .catch((error) => {
-        store.source('Recorder cache', 'error', error.message)
-      })
+      .catch((error) => store.source('Recorder cache', 'error', error.message))
     return saving
   }
-
   const refresh = () => {
     scanning = scanning
       .catch(() => {})
       .then(async () => {
-        if (closing) {
-          return
-        }
-        const now = Date.now()
-        await reader.scan(now)
-        extendLive(Date.now())
-        store.collectedUntil = now
-        store.prune(now)
-        if (now - lastSave >= 15000) {
-          await persist()
-        }
-        orca.panels.post('activity.changed', { at: now })
+        if (closing) return
+        await collector.scan()
+        if (Date.now() - lastSave >= 15000) await persist()
+        orca.panels.post('activity.changed', { at: Date.now() })
       })
-      .catch((error) => {
-        store.source('Collector', 'error', String(error.message))
-      })
+      .catch((error) => store.source('Collector', 'error', error.message))
     return scanning
   }
-
   let ready
   orca.panels.handle('activity.snapshot', async (input) => {
     await ready
-    extendLive(Date.now())
-    return memory.snapshot(
-      store.snapshot(Date.now(), { hideShortTasks: input?.hideShortTasks !== false })
-    )
+    return store.snapshot(Date.now(), { hideShortTasks: input?.hideShortTasks !== false })
+  })
+  orca.panels.handle('activity.inputs', async (input) => ({
+    agentId: input?.agentId,
+    inputs: [],
+    unavailable: true,
+    reason: 'Conversation text is not available through Orca’s public plugin API.'
+  }))
+  orca.panels.handle('activity.navigate', async (input) => {
+    await ready
+    return navigate(input)
   })
   orca.commands.register('refresh', async () => {
     await ready
     await refresh()
     return { refreshed: true }
   })
-
   ready = (async () => {
     try {
       const head = await orca.storage.get(`${STORAGE_PREFIX}:head`)
       if (
-        [1, 2].includes(head?.version) &&
+        head?.version === 2 &&
         ['a', 'b'].includes(head.generation) &&
         Number.isInteger(head.chunks) &&
         head.chunks > 0 &&
@@ -182,9 +113,7 @@ export default async function activate(orca) {
         const chunks = []
         for (let index = 0; index < head.chunks; index++) {
           const chunk = await orca.storage.get(`${STORAGE_PREFIX}:${head.generation}:${index}`)
-          if (typeof chunk !== 'string') {
-            throw new Error('Recorder cache is incomplete; rebuilding from source logs')
-          }
+          if (typeof chunk !== 'string') throw new Error('Public recorder cache is incomplete.')
           chunks.push(chunk)
         }
         store.restore(decodeRecorderCache(head, chunks))
@@ -192,55 +121,25 @@ export default async function activate(orca) {
         oldChunks = head.chunks
       }
     } catch (error) {
-      store.source('Recorder cache', 'error', String(error.message))
-    }
-    const configured = await orca.settings.get('dataDirectories')
-    const directories =
-      typeof configured === 'string' && configured.trim()
-        ? configured
-            .split('\n')
-            .map((path) => path.trim())
-            .filter(Boolean)
-        : [defaultDataDirectory()]
-    reader = new OrcaLogReader(store, [...new Set(directories)])
-    const recentInputs = new RecentInputs(reader)
-    orca.panels.handle('activity.inputs', async (input) => {
-      await ready
-      await scanning
-      return recentInputs.read(input)
-    })
-    memory = new TerminalMemory(store, directories, () =>
-      orca.panels.post('activity.changed', { at: Date.now() })
-    )
-    const navigate = createTerminalNavigator(store, directories)
-    orca.panels.handle('activity.navigate', async (input) => {
-      await ready
-      return navigate(input)
-    })
-    initialized = true
-    for (const event of pendingEvents.splice(0)) {
-      receive(event)
+      store.source('Recorder cache', 'error', error.message)
     }
     await refresh()
+    initialized = true
+    for (const event of pendingEvents.splice(0)) collector.receive(event)
     const tick = async () => {
       await refresh()
-      if (!closing) {
-        timer = setTimeout(tick, 5000)
-      }
+      if (!closing) timer = setTimeout(tick, 5000)
     }
     timer = setTimeout(tick, 5000)
   })()
-
   stop = async () => {
     closing = true
-    memory?.close()
     clearTimeout(timer)
     subscription.dispose()
     await ready
+    clearTimeout(timer)
     await scanning
-    store.collectedUntil = Date.now()
     await persist()
-    reader?.close()
   }
   await ready
 }

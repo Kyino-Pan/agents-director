@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { mkdir } from 'node:fs/promises'
 import { test } from 'node:test'
 import { startPreview } from './preview.mjs'
 import { snapshot } from './panel.fixture.mjs'
@@ -107,7 +105,7 @@ test('context actions and platform click navigate the selected agent, preserving
   await page.close()
 })
 
-test('native Chats without terminal handles or pane keys remain navigable from narrow lanes', async () => {
+test('history sessions without terminal handles remain navigable from narrow lanes', async () => {
   const data = structuredClone(snapshot)
   const agent = data.agents[0]
   agent.sessionId = 'native-chat'
@@ -122,7 +120,7 @@ test('native Chats without terminal handles or pane keys remain navigable from n
   try {
     const lane = page.locator(`.lane[data-agent="${agent.id}"]`)
     await lane.click({ button: 'right' })
-    const action = page.getByRole('menuitem', { name: 'Open or resume Chat', exact: true })
+    const action = page.getByRole('menuitem', { name: 'Open or resume terminal', exact: true })
     assert.equal(await action.isEnabled(), true)
     await action.click()
     assert.deepEqual(await page.evaluate(() => window.navigationRequest), { agentId: agent.id })
@@ -510,8 +508,7 @@ test('window slider spans five minutes to seven days and clamps to older snapsho
 })
 
 test('loopback preview serves the identity module and follows system appearance', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'orca-activity-preview-'))
-  const preview = await startPreview({ directories: [directory] })
+  const preview = await startPreview()
   try {
     for (const colorScheme of ['light', 'dark']) {
       const page = await browser.newPage({ colorScheme })
@@ -522,7 +519,8 @@ test('loopback preview serves the identity module and follows system appearance'
       )
       await page.goto(preview.url)
       assert.equal((await moduleResponse).status(), 200)
-      await page.getByText('No activity observed yet', { exact: true }).waitFor()
+      await page.locator('.lane').first().waitFor()
+      assert.match(await page.locator('#source-list').textContent(), /Illustration only/)
       assert.equal(
         await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
         colorScheme
@@ -532,7 +530,6 @@ test('loopback preview serves the identity module and follows system appearance'
     }
   } finally {
     await preview.close()
-    await rm(directory, { recursive: true, force: true })
   }
 })
 

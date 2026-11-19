@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { ActivityStore, WINDOW_MS } from './activity-store.mjs'
-import { importJournalRow, importTranscriptRow } from './orca-log-reader.mjs'
 
 const NOW = Date.parse('2026-11-02T08:00:00Z')
 const START = NOW - 3_600_000
@@ -71,56 +70,6 @@ test('active, approval, question and insufficient or ambiguous observations stay
   store.point('wait', 'resolved', START + 10_000, 'waiting', 'journal', START + 900_000)
   work(store, 'resolved', START + 900_000, START + 910_000)
   assert.equal(ids(filtered(store)).includes('resolved'), false)
-})
-
-test('an open journal turn or pending prompt survives another turn completion until resolved', () => {
-  const store = new ActivityStore(START)
-  const row = (itemId, body) => ({ kind: 'item', epoch: 'e', itemId, ts: START + 5000, body })
-  const completed = row('finished', { kind: 'turn', startedAt: START, completedAt: START + 10_000 })
-  const open = row('open', { kind: 'turn', startedAt: START })
-  importJournalRow(store, 'parallel', completed, NOW)
-  importJournalRow(store, 'parallel', open, NOW)
-  assert.deepEqual(ids(filtered(store)), ['session:parallel'])
-  const restored = new ActivityStore(NOW)
-  restored.restore(store.serialize(), NOW)
-  assert.deepEqual(ids(filtered(restored)), ['session:parallel'])
-  open.body.completedAt = START + 10_000
-  importJournalRow(restored, 'parallel', open, NOW)
-  assert.deepEqual(ids(filtered(restored)), [])
-  for (const kind of ['question', 'approval']) {
-    const pending = row('prompt', { kind, resolution: { state: 'pending' } })
-    importJournalRow(restored, kind, completed, NOW)
-    importJournalRow(restored, kind, pending, NOW)
-    assert.ok(ids(filtered(restored)).includes(`session:${kind}`))
-    pending.body.resolution = { state: 'resolved', resolvedAt: START + 6000 }
-    importJournalRow(restored, kind, pending, NOW)
-    assert.equal(ids(filtered(restored)).includes(`session:${kind}`), false)
-  }
-})
-
-test('completed Codex and Claude transcript turns hide and new work makes them reappear', () => {
-  for (const provider of ['codex', 'claude']) {
-    const store = new ActivityStore(START)
-    const row = (at, done = false) =>
-      provider === 'codex'
-        ? {
-            timestamp: at,
-            type: 'event_msg',
-            payload: { type: done ? 'task_complete' : 'task_started' }
-          }
-        : {
-            timestamp: at,
-            type: done ? 'assistant' : 'user',
-            message: done ? { stop_reason: 'end_turn' } : { content: 'Run a scheduled task' }
-          }
-    importTranscriptRow(store, provider, provider, row(START), 'transcript')
-    assert.deepEqual(ids(filtered(store)), [provider])
-    importTranscriptRow(store, provider, provider, row(START + 1000, true), 'transcript')
-    assert.deepEqual(ids(filtered(store)), [])
-    assert.deepEqual(ids(store.snapshot(NOW)), [provider])
-    importTranscriptRow(store, provider, provider, row(START + 10_000), 'transcript')
-    assert.deepEqual(ids(filtered(store)), [provider])
-  }
 })
 
 test('filter precedes all snapshot budgets, preserves children and removes dangling messages', () => {

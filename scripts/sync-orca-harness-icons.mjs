@@ -1,4 +1,6 @@
 import { build } from 'esbuild'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -21,8 +23,7 @@ const stubs = {
 }
 const result = await build({
   stdin: {
-    contents: `export { AgentIcon, getAgentCatalog, getAgentLabel } from ${JSON.stringify(join(source, 'src/renderer/src/lib/agent-catalog.tsx'))};
-      export { runProcess } from ${JSON.stringify(fileURLToPath(new URL('../vendor/process-host/run-process.ts', import.meta.url)))};`,
+    contents: `export { AgentIcon, getAgentCatalog, getAgentLabel } from ${JSON.stringify(join(source, 'src/renderer/src/lib/agent-catalog.tsx'))};`,
     resolveDir: source
   },
   bundle: true,
@@ -60,13 +61,15 @@ const result = await build({
     }
   ]
 })
-const { AgentIcon, getAgentCatalog, getAgentLabel, runProcess } = await import(
+const { AgentIcon, getAgentCatalog, getAgentLabel } = await import(
   `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`
 )
-const revision = await runProcess({ program: 'git', args: ['-C', source, 'rev-parse', 'HEAD'] })
-if (revision.code !== 0) {
-  throw new Error('Cannot resolve the Orca source revision')
-}
+// Development-only Git metadata; the plugin worker never imports this generator.
+const revision = await promisify(execFile)('git', ['-C', source, 'rev-parse', '--verify', 'HEAD'], {
+  encoding: 'utf8',
+  timeout: 10000,
+  maxBuffer: 64 * 1024
+})
 const commit = revision.stdout.trim()
 const supported = await readFile(join(source, 'src/shared/agent-type-icon-agent.ts'), 'utf8')
 const ids = [...supported.matchAll(/^  (?:'([^']+)'|(\w+)): true,?$/gm)].map((m) => m[1] ?? m[2])

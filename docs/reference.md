@@ -1,300 +1,140 @@
 # Agents Director reference
 
-[Back to overview](../README.md)
+## Requirements and installation
 
-## Install
+Orca **>=1.4.260**, plugin Host API **1.10**, desktop. The version floor covers
+`agent.listSessions`, the expanded `agent.resume`, public session identities,
+workspace/project listing and terminal focus. Workspace-scoped `agents.list` requires
+host API 1.10; detecting the older method by name alone is insufficient. See Orca's
+[host API reference](https://github.com/stablyai/orca/blob/main/docs/reference/plugin-host-api.md).
 
-Requires **Orca >=1.4.246 / plugin Host API 1.2**.
-Open **Settings → Plugins → Add plugin → From a Git URL…** and enter:
+Install `https://github.com/Kyino-Pan/agents-director#main` through
+Settings → Plugins → Add plugin → From a Git URL. Open the Agents Director panel
+or create an Agents Director editor from the tab-bar + menu. New permissions must
+be approved in Orca before updating from 0.1.x.
 
-```text
-https://github.com/Kyino-Pan/agents-director#main
-```
+## Timeline and controls
 
-The release includes its terminal-navigation bundle; installation needs no build or npm install.
-This free, MIT-licensed community plugin has no analytics or telemetry.
-It is not an official Orca product.
+Lanes use public session titles, harness labels and workspace/project membership.
+Task titles from `agents.list` provide fallback names. A terminal with no public
+session identity can show observed states, but cannot be resumed by this plugin.
 
-Review and approve the access request Orca displays. The worker reads
-local source logs using Node, with private storage, settings and `agent:read` access. No terminal
-input, notifications, secrets or network access are requested through the host API. An explicit
-Open or resume action can start a saved CLI conversation through the trusted worker runtime;
-it can also reopen an existing saved Chat tab.
+- Search by name, identity or workspace.
+- Select a lane or state for details; copy its identity from the detail panel.
+- Use the window slider, duration presets, From/To controls, pan or modified wheel
+  to inspect a period from five minutes to seven days.
+- Pause view freezes inspection while collection continues.
+- Hide short tasks filters only reliably finished executions below three minutes.
+  Incomplete history remains visible. Session summaries alone never prove a short task.
+- Sort by recent activity. Shorter links and relation rendering remain compatible
+  with synthetic fixtures; the public API supplies no new relationship observations.
+- Right-click → Data sources shows collection errors, truncation and coverage.
+- Layout preferences use the plugin's own storage.
 
-- **Full overview:** tab-bar **+ → Agents Director**, or choose the new-file command **Agents Director**.
-  This opens an `.orca-activity` document in the main editor area, where the view can be split.
-- **Sidebar:** open the **Agents Director** plugin panel.
-- **Inspect:** click an agent, state segment or message arrow to open a floating detail view;
-  Close or Escape dismisses it. The timeline fills the remaining viewport height, and inspection
-  does not shrink it. Arrow controls support keyboard selection.
-- **Agent details:** Agent ID and the friendly Harness name stay visible, with **Copy agent ID**.
-  Session, provider session, pane, terminal, task, dispatch, run, workspace and parent identifiers
-  are under the initially collapsed **More information** disclosure. Lane and activity-segment
-  inspection share this layout; coordination messages retain their own message body.
-- **Recent user inputs:** lane and segment details show up to three saved user turns, newest first,
-  with timestamps and literal multiline text. Only the selected conversation is read on demand;
-  the list is independent of the timeline window. Missing timestamps say “Time unavailable”.
-  Each text is capped at 4,000 characters and marked when truncated. Empty and unavailable sources
-  have distinct messages. Coordination-message details omit this list.
-- **Lane order:** agents within each project default to most recently observed activity first.
-  **Shorter links** toggles ordering to minimize the total vertical span of spawn and message
-  connections in the selected window, counting each message even when arrows are visually bundled.
-  Cross-project connections contribute without moving project bands. Equal costs prefer activity
-  order, then stable agent ID. Up to 14 lanes per project use an exact optimizer; larger groups use
-  six bounded improvement passes and never increase the cost over activity order. The toggle stays
-  selected during live refresh, search and zoom. Window duration and lane-order mode are saved
-  in Orca plugin storage and restored when a panel or editor is reopened; the first view defaults
-  to 24 hours and activity order. Reopening follows the latest time rather than a stale panned date.
-  Reordered lanes, activity bars and connection endpoints move together over 200ms; system
-  reduced-motion preferences disable the transition.
-- **Hide short tasks (< 3 min):** enabled by default and saved alongside the window and lane-order
-  preferences. Turn it off to show short tasks again; collection and the raw history cache are
-  unchanged. It hides only finished tasks with a positive, reliably observed cumulative execution
-  duration **strictly below 3 minutes**. Exactly 3 minutes stays visible. This measures observed
-  execution in the retained history, not process lifetime or time since creation: overlapping
-  execution observations count once, while done/idle, approval/question, and unknown gaps never
-  count as execution. Active, approval/question, completion-only, unbounded, unsettled, contradictory, or
-  trimmed histories stay visible; unexplained gaps between execution and completion also keep a
-  task visible. A completed/idle turn does not prove that its terminal process exited. Future work
-  in that conversation makes it visible again. Classification uses all retained observations,
-  independent of search, panning, zoom and viewport width. Filtering precedes lane, segment and
-  message snapshot budgets. Messages require both returned endpoints; children retain their
-  recorded parent ID even when that parent is outside the snapshot, without a substitute target.
-  Changing the filter requests fresh data, including while paused; all other view preferences
-  remain in place. If every task is hidden, the empty state explains how to turn the filter off.
-  Ready-only terminal placeholders without a saved conversation, assignment or observed
-  working/waiting/blocked activity are omitted independently of this toggle and before drawing
-  budgets. Their raw observations remain cached for later enrichment. Unidentified active or
-  previously active agents, real unknown assignments and incomplete histories remain eligible.
-- During wheel panning or zooming, existing lane positions stay fixed. New agents append at the
-  bottom so their activity, spawn links and messages appear immediately as the timeline moves.
-  After 180ms without wheel input, lanes filter, regroup and smoothly reorder for the final window.
-  Panning into an empty interval keeps the timeline and scroll area available, with an in-chart
-  message, so you can scroll back without resetting the window.
-- **Data sources:** right-click the view → **Data sources**. The coverage details open on demand.
-  The agent/message summary, selected period and coverage notice stay in the footer below the timeline.
-- **Open or resume Chat / terminal:** right-click an agent lane or segment → **Open or resume Chat** for native
-  sessions or **Open or resume terminal** for CLI agents, or Command-click
-  on macOS / Ctrl-click on Windows and Linux. Ordinary clicks still inspect activity. Shift+F10
-  opens the same menu from the keyboard. A current owner is preferred; eligible closed conversations reopen in their original workspace.
-  Unverified exits, missing identities and unsupported routes show a reason without starting anything.
-- **Terminal memory:** the second line of each lane shows current terminal-and-child-process memory,
-  sampled at most every 30 seconds while the view requests updates. Units are MiB/GiB; hover
-  for the metric and sample time. macOS uses footprint, Linux RSS and Windows working set,
-  as reported by Orca diagnostics. This measures the terminal subtree, not an individual model.
-  Only exact current local terminal matches qualify. Historical agents, native Chats, internal
-  subagents without their own terminal, remote terminals and imported sources show no value.
-  Samples expire after 60 seconds and never enter the history cache. Pause freezes these values
-  along with the view; panning history still shows current memory for a currently owned terminal.
-- **Window controls:** the slider and From/To fields share a row in wide panels and wrap in narrow
-  panels. Round duration ticks beneath the logarithmic slider select an exact window; available
-  ticks adapt to retained history and panel width. Dragging and native slider keys remain continuous.
-- **Pause view:** freezes the displayed snapshot for inspection; collection continues. Resume shows
-  the latest snapshot. The time-scale slider or Ctrl/Command-wheel adjusts the visible window; horizontal wheel or Shift-wheel pans it. Ordinary vertical scrolling moves through the page and tracks. Project bands with recorded communication are placed near one another. Only agents with observed activity, a completion or spawn, or a coordination message in the selected window are shown; an old completed or unobserved state alone does not keep a lane visible. The From and To fields select local-time endpoints within the retained history. Nearby messages between the same agents collapse into a count; select it to inspect each message.
+Command-click on macOS or Ctrl-click elsewhere opens the selected session. The
+context menu offers the same **Open or resume terminal** action. Navigation first
+rechecks workspace membership and current agent ownership through public APIs.
+It focuses an exact matching terminal; otherwise it verifies the original session
+in that workspace's public history and calls `agent.resume`, then `terminal.focus`.
+Ambiguous ownership, missing identities/workspaces, unsupported providers and host
+denials are reported. There is no shell or internal-runtime fallback. Restoring a
+Chat-specific tab is not part of this API: saved sessions resume through Orca's
+terminal workflow. The host controls provider, account, execution host and launch
+policy. A cancelled focus reports failure even if a resume already started.
 
-Project bands use the saved project catalog and project-group membership, including folder workspaces; unresolvable membership is shown as unavailable. Workspace remains a secondary identity. Agent lanes show Orca harness icons and a short session identifier. Native Chat pane events
-join their saved conversation records, including older Codex/Claude handle formats.
-Agent lanes prefer recorded names: user-renamed conversations, saved conversation names,
-orchestration task names, then terminal titles. Lower-priority observations never replace a
-known name. Unnamed history keeps its provider/ID fallback. Canonical IDs stay stable when names
-change; available Orca/provider session IDs, pane keys, terminal handles and orchestration IDs
-remain attached for inspection, search and terminal navigation.
+## Data and coverage
 
-Dispatches join a saved conversation using explicit session identity or unambiguous observed
-ownership during the assignment, bounded by completion or the next assignment on that address.
-This also joins launches whose first conversation observation arrives after dispatch. Conflicting
-owners, stale pre-launch evidence and workspace/address mismatches stay unresolved. Repeated scans
-and cache restores preserve established dispatch bindings; a reused pane cannot transfer an old
-assignment to its successor. Followups on the same conversation retain their dispatch aliases and
-activity, with the latest task supplying lane metadata. Assignment alone never implies working.
+The worker calls only:
 
-Host API 1.2 has no terminal navigation or resume method, so the trusted worker uses the
-desktop's bundled CLI and authenticated local runtime socket. Before `terminal switch`, it
-joins the live workspace tab's provider/session identity to a fresh terminal inventory, checks
-the handle and checks conversation ownership again. Historical pane aliases alone never
-prove ownership: a reused pane cannot open its successor by mistake. Navigation is disabled
-for imported data directories and browser previews.
+| Method                                            | Purpose                                          |
+| ------------------------------------------------- | ------------------------------------------------ |
+| `workspace.list({ includeStatus: true })`         | Discover public workspace ids and names          |
+| `project.list({})`                                | Resolve project names on the matching host       |
+| `agents.list({ workspaceId })`                    | Observe each workspace's current terminal agents |
+| `agent.listSessions({ limit: 200 })`              | Read newest session summaries every 30 seconds   |
+| `agent.listSessions({ workspaceId, limit: 200 })` | Verify a saved session on a navigation action    |
+| `agent.resume({ workspaceId, agent, sessionId })` | Resume after a navigation action                 |
+| `terminal.focus({ terminalId })`                  | Focus a freshly matched or resumed terminal      |
 
-A closed local conversation from any of the 26 audited Orca-native resumable CLI harnesses,
-with an explicitly recorded provider identity, workspace and local execution host, can use
-`terminal.ensureAgentSession` with `resumeOrigin: saved`. Orca owns resume command construction
-and conversation claims; the plugin sends no
-shell command, fresh-agent request or prompt. The original workspace must still resolve on
-the original host and its directory must exist. A missing or incomplete inventory, ambiguous
-owner or disconnected process is refused rather than treated as closed. Host capability checks
-must advertise both host authority and saved-resume support. Remote CLI resume is refused;
-Windows CLI resume is refused because hook records do not establish the original native/WSL
-route. Existing verifiable terminal navigation still works on those platforms and hosts.
-Internal model subagents without a separate recorded standalone identity cannot be resumed.
-The supported harnesses are Claude, CodeBuddy, Codex, Qoder, Qoder CN, Qwen Code, Gemini,
-Antigravity, OpenCode, OpenCode2, Pi, Mimo Code, Droid, Grok, Devin, OMP, Prime Agent,
-Copilot, Cursor, Kimi, Muse, ZCode, DSH, JCode, Kiro and Hermes. The execution host must also
-support the selected harness; unrecognized providers remain refused.
+Current inventories refresh every five seconds, at most four workspace requests
+at a time. `agent.status.changed` updates identities already known from public
+results. `workspaceListId` is preferred over the older event's internal address;
+unknown identities wait for the next public inventory. An event arriving during an
+older inventory response wins for that terminal. Event state is not extended by
+merely reading a panel snapshot.
 
-Cursor and Antigravity require `conversation_id`; the others use `session_id`. Pi and Prime
-Agent additionally require their explicitly recorded absolute `transcriptPath`, which is part
-of their ownership identity. OMP forwards its recorded transcript locator when available,
-otherwise its ID; native host settings own launch configuration. Recorded transcript paths
-and Claude effort survive the recorder cache and are sent as metadata, never as shell text.
-No transcript path is inferred from an ID or accepted from the panel. Missing historical file
-metadata cannot be recovered by starting a fresh session. IDs follow the native contract
-(up to 512 characters, no controls, surrounding whitespace or leading hyphen), including
-punctuation and Unicode that the host handles as arguments.
+Every state interval is bounded by observations. Missing terminals, failed reads,
+worker downtime and poll gaps over 15 seconds stop continuity; they never imply
+continued work or completion. Session `createdAt`, `updatedAt` and `running` are
+metadata, not execution intervals. Before public collection, history is unknown.
+The public session list omits subagent transcripts and Antigravity IDE conversations.
+The plugin cannot restore historical states it never observed. Remote coverage is
+limited to what the connected Orca host exposes through these APIs; there are no
+custom profile directories, copied databases or direct remote-file reads.
 
-The native ensure RPC does not accept recorded `cwd`. The collector retains that evidence;
-when it differs from the original workspace directory, resume is refused because this API
-cannot preserve it. This matters for work-directory-scoped harnesses such as Kimi and DSH.
-Existing verified live owners can still be opened without a resume mutation.
+Session history is bounded to the newest 200 sessions across workspaces, and the
+host may truncate workspace/project lists. Source details report these limits.
+The panel retains its existing budgets (160 lanes, 4,000 segments, 600 messages),
+and the recorder bounds points/messages at 5,000 each. These are coverage limits,
+not evidence that omitted sessions did not run.
 
-Native Chat remains a Chat. An open tab is found by exact Orca session ID. A closed Chat uses
-`agentSession.reveal` to republish that same saved conversation, after verifying its recorded
-local execution location and the original workspace. It never creates a replacement Chat or
-terminal. Remote/WSL or unknown Chat resume routes are refused. Opening either Chat path then
-uses `terminal.reveal` with a desktop acknowledgement and host-only `session.tabs.activate`;
-both the acknowledgement and selected session must match. These RPCs use the local Unix
-socket or Windows named pipe; ephemeral runtime credentials stay in worker memory.
+**Unavailable through the public API:** orchestration messages/parent-child links,
+conversation bodies and recent user inputs, process memory, original command
+arguments and private execution metadata. The recent-input section explains that
+conversation text is unavailable. No terminal screen scraping is used to infer it.
+No CLI subprocess, internal RPC, runtime token, database or provider transcript is
+read by the worker.
 
-Concurrent navigation requests are blocked across the worker's panels. Once a resume mutation
-is sent, another click cannot issue another resume until the exact live terminal owner or
-saved Chat tab is verified in its recorded workspace. This settles the attempt even if desktop
-focus subsequently fails, and allows a later close-and-resume lifecycle. Timeouts, lost replies,
-refusals and unconfirmed ownership stay fenced while no exact owner is observed; inspect the
-original workspace in Orca before manual recovery. Orca's CLI resume claim additionally prevents
-duplicate conversation owners. Restarting the worker clears the local attempt guard; it does
-not establish that an uncertain process exited. Navigation/resume calls run only on the explicit
-gesture, never on refresh.
+## Cache and upgrade
 
-The worker remains a full-access Node process; its manifest capabilities are not an OS
-sandbox. See [access boundaries](security.md) for the enforced application checks and limits.
-Imported transcripts must be inside their selected data directory. The default local source
-also accepts Codex `sessions`/`archived_sessions` and Claude `projects` under their configuration
-directories. References outside those roots appear as unavailable in Data sources.
+Own storage keeps compressed observations under `activity-public-v1`, with an
+alternating chunk generation and an atomic head update. It saves about every
+15 seconds and on orderly shutdown; offline intervals stay unknown after restore.
+The encoded budget is 1.8 MiB; decompression is bounded to 32 MiB. Storage failures
+appear under Data sources. An over-budget save keeps the previous generation.
 
-Coordinator project membership also uses saved terminal tabs and terminal-close records from
-the selected profile, so closing a terminal or losing its status cache does not lose a known
-project. Conflicting tab ownership stays unresolved. These records establish placement only,
-not activity during gaps in state observations.
-
-For older Orca builds, run the log-backed preview from this checkout with **Node >=22.13**:
-
-```sh
-node preview.mjs
-```
-
-Open the printed loopback URL in Orca's built-in browser or a normal browser. It uses real logs and
-refreshes every five seconds, but has no direct plugin status subscription or private recorder
-cache. The preview uses the included Orca theme variables. Stop with Ctrl-C. Optional
-`--data-dir <absolute-path>` (repeatable) selects data directories; `--port <port>` fixes its port.
-
-## Data and retention
-
-The trusted worker reads, without modifying source databases:
-
-- `agent-session-journal.db`: saved turn endpoints, question/approval observations, and recorded
-  child-agent lifecycle blocks. Native Chat history supports legacy inline rows and v5 outcome
-  markers with outcome formats 1 and 2. The reader uses the active epoch/generation, applies the
-  latest published item values and deletions over any inline prefix, and skips unchanged outcome
-  data. Unsupported formats appear as limited source coverage. Open turns stop at their saved
-  observation time; they do not prove continuous work up to the present.
-- `agent-hooks/last-status.db` (Orca 1.4.257+, schema 202), or the legacy `last-status.json`
-  when no database exists: pane/session correlation and recent state observations. This is
-  a cache, not a full historical log. Its provider transcript paths select local Codex/Claude
-  JSONL files for incremental parsing; the plugin never scans unrelated home-directory sessions.
-- `orchestration.db`: saved Runs, dispatch lineage and messages. Messages are matched to agent
-  lanes through recorded session, pane, dispatch and terminal addresses. Delivery timestamps are
-  not presented as proof that a model understood or acted on a message.
-- `agent.status.changed`: live main-agent states (fallback to the pane aggregate on older hosts).
-  Live timestamps use local receipt time so remote clock drift does not move the live cursor.
-- The saved profile catalog supplies explicit terminal-tab closure timestamps. These bound
-  live observations, including older recorder-cache entries; closure leaves subsequent time
-  unknown and does not resolve a pending approval. Pane ownership is recorded per observation
-  so moving a conversation or reusing a pane cannot move its earlier activity to another session.
-
-The worker imports logs, then refreshes source files every five seconds while continuing to accept
-live events. Turns with known start/end observations become intervals. Assignment alone never
-counts as continuous work. Missing endpoints, interrupted collection and unsupported records stay
-unknown. Child branches are only drawn when their identity and ancestry are recorded.
-
-Only the last 7 days are returned, including an interval crossing the left boundary. Completed
-activity and messages expire after 7 days. The worker saves a chunked, two-generation private
-cache roughly every 15 seconds and on orderly shutdown, and rebuilds it from source logs after a
-restart. A crash may lose the last unsaved live observations; offline time is not guessed.
-
-Bounded readers process 2,000 journal rows per pass, a 32 MiB tail per referenced transcript, and
-up to 3,000 messages / 1,000 dispatches per source. Storage keeps at most 5,000 points and 5,000
-messages, with a 1.8 MiB compressed recorder-cache budget (32 MiB decoded). Legacy uncompressed
-caches are migrated on the next successful save. Dense windows can exceed these bounds;
-the view explicitly reports partial coverage. Snapshot drawing is capped at 160 lanes, 4,000
-segments and 600 messages; message previews are capped at 400 characters.
-
-Recent inputs use the existing permitted provider transcript references (local Codex/Claude CLI)
-or the selected native Chat's active journal epoch. Codex supports legacy user events, wrapped and
-unwrapped user messages, and paginated `item_completed` user items. Paginated completed items take
-precedence over model copies; legacy user events take precedence over response copies. A mixed-format
-rollout uses its authoritative representation, so older turns recorded only in a superseded format
-may be absent. Claude supports string/text-block user messages and human prompt-mode queued commands.
-Native Chat supports inline v1–v4 user-message items and published outcome formats 1/2 over their
-inline prefix, including revisions, deletions and recorded alias/echo identities. Pending submissions
-without a saved user-message item are not inferred. Assistant/system text, tool results, nontext
-attachments and source-marked metadata or automated messages are excluded. CLI logs without authorship
-metadata cannot distinguish an externally typed prompt from a person's input; no text-based guess is made.
-
-The input reader retains one result for at most four seconds, with one active read globally. It
-accepts only a canonical agent ID, never a file path or a pane address. Direct conversation identity
-must match; internal children do not inherit their parent's inputs. It reads at most 32 MiB of a
-transcript (including a bounded header for its history mode), skips records over 1 MiB, and labels
-partial tails. Native reads use indexed published-key lookups and cap each request at 2,000 records/
-items, 16 MiB total JSON and 1 MiB per record; exceeding these limits reports unavailable rather than
-showing obsolete revisions. Transient text is bounded to three 4,000-character inputs per representation
-while parsing transcripts; journal folding is bounded by the limits above. Only three inputs are sent
-to the panel (under 96 KiB even with JSON escaping). Input text never enters ActivityStore, timeline
-snapshots, the 1.8 MiB recorder cache, or plugin storage. Closing/changing the detail clears its list;
-late responses cannot populate a different selection, and unchanged refreshes preserve the list DOM.
-
-## Profiles and remote work
-
-The default source is this computer's platform-specific Orca data directory. Set **Plugins →
-Agents Director → Orca data directories** to one absolute directory per line for alternate profiles
-or read-only mounted/synchronized host copies, then restart the plugin worker. The collector does
-not SSH to hosts. Local orchestration records can include remote workers/messages, but their
-provider logs are read only when those files are available on the collector host. A copied remote
-database must be a coherent SQLite backup, including committed WAL data; copying a live `.db`
-alone may omit recent records.
-
-This first version targets desktop plugin frames. Browser-client frames require asset inlining;
-the loopback preview works in browsers. The UI supports narrow sidebar/mobile-sized viewports,
-but the mobile app does not install or run this desktop worker.
+0.1.x data under `activity-v1` stays untouched and is not read or imported. Old
+identities and routes came from a different collection source; importing them
+would mix private-file observations with public identities. Existing window and
+order preferences remain in the same plugin-owned storage. `dataDirectories` was
+removed and no longer selects any filesystem roots. Versions before 0.2.0, legacy
+screenshots and cover artwork describe the earlier implementation.
 
 ## Development and validation
 
-Use Node >=22.13. From this repository:
+Node **>=22.13** is sufficient. In this checkout:
 
 ```sh
 npm ci
-npm run build
-npx playwright install chromium
-ORCA_BACKGROUND_LAUNCH=1 npm test
 npm run lint
 npm run format:check
+npm test
 orca plugin validate . --json
 orca plugin check . --json
 ORCA_BACKGROUND_LAUNCH=1 orca plugin test . --json
-orca plugin dev load . --json
+orca plugin inspect /path/to/clean-package --json
 ```
 
-The environment assignment examples above use a POSIX shell. In PowerShell, set
-`$env:ORCA_BACKGROUND_LAUNCH = '1'` before running the test commands.
+Run `plugin inspect` on a clean package containing only versioned files: a development
+checkout with `node_modules` can fail its symlink check. Validation and tests above
+run in the development checkout.
 
-`npm run build` bundles the vendored upstream process launcher into `dist/terminal-cli.mjs`.
-Rebuild and commit that file after editing the launcher or `worker/terminal-cli.mjs`.
-The complete source and its MIT license are included; see [NOTICE.md](../NOTICE.md).
-`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` can select an existing headless Chromium.
+No runtime bundle or build step is needed. The icon-generation script uses esbuild
+and React only as development dependencies; see NOTICE.md.
 
-Tests cover collection, project ownership, handoff identity, terminal navigation, ordering,
-animation, persistence, empty-range recovery, light/dark rendering and narrow layouts.
-`orca plugin check` validates HTML panels but does not render them; headless browser tests
-provide the rendered checks. Native plugin checks have been performed on macOS with Orca
-1.4.246. Windows and Linux native app behavior has not yet been verified.
-Resume capabilities and strict RPC parameter contracts were checked against installed Orca
-1.4.248. Resume mutations are tested with stubs and private fake runtimes; validation does not
-resume real user conversations or reveal desktop windows.
+`npm run preview` starts a loopback browser preview with **synthetic data only**.
+It reads the plugin's own UI assets, not Orca data. It cannot navigate or resume
+real agents. Old `--data-dir` arguments are no longer supported.
+
+Node tests use a strict fake public host, covering identity changes, missing and
+failed observations, event/inventory races, history truncation, ownership checks,
+resume/focus errors and storage restore. Resume/focus calls are mocked. Browser
+tests cover rendering and controls at desktop and narrow widths. Plugin validation
+and checks do not prove live provider resume or all native platforms. No checks
+should start or resume a real conversation without a deliberate navigation action.
+
+The `validate-plugin` CI job runs Orca's official `validate:plugin` against a clean
+plugin checkout using the pinned v1.4.260 source revision and Node 24. It follows the
+official catalog CI's JavaScript-only dependency setup (`--ignore-scripts`), without
+building or launching Electron. The main test job still exercises Node 22. Update
+the validator revision deliberately when adopting newer host APIs.

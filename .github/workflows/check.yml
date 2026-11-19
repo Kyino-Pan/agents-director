@@ -15,8 +15,43 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run build
-      - run: git diff --exit-code -- dist/terminal-cli.mjs
       - run: npm run lint
       - run: npm run format:check
       - run: npm test
+
+  validate-plugin:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # Orca v1.4.260: explicit API 1.10 validator, updated deliberately.
+      ORCA_VALIDATOR_REF: 3330a89fa30edfd154901546f368ab4d6329962c
+    steps:
+      - name: Check out plugin without development dependencies
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+          persist-credentials: false
+      - name: Check out the pinned official validator
+        uses: actions/checkout@v4
+        with:
+          repository: stablyai/orca
+          ref: ${{ env.ORCA_VALIDATOR_REF }}
+          path: orca-validator
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: orca-validator/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: orca-validator/pnpm-lock.yaml
+      # Same setup as Orca's catalog CI: JavaScript dependencies, no native/Electron scripts.
+      - name: Prepare the official validator
+        working-directory: orca-validator
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm run build:packages
+      - name: Validate the plugin with Orca's own checks
+        working-directory: orca-validator
+        run: pnpm validate:plugin ../plugin
