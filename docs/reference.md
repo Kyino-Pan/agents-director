@@ -113,27 +113,88 @@ Agents Director custom editor at five-minute zoom and `orca plugin shot`.
 - New-terminal JSON receipts from `agent launch`, `worktree create --agent` and ready `orchestration worker-start`
   receipts can supply a child handle. A solid curve requires its first observed
   public session identity and a public session creation time at or after the
-  launch began. An attached existing worker can establish a dispatch address.
+  launch began. Worker starts accept `--spec`, `--spec-file` and `--task`,
+  including a task title and a base branch for a new worktree. An attached
+  existing terminal (`--terminal`) can establish a dispatch address.
   It cannot create a parent relationship. `agent resume` is excluded.
 - Sender and receiver identities come from the live terminal inventory and status
   changes. An observed ready dispatch can resolve `dispatch:…` to the same live
   terminal session. For a bot, run, implicit mailbox or unmapped dispatch, a matching
   send and receiver check ID can join the two observed terminals. Names, task titles
-  and time proximity never supply an endpoint. Native chat and bot Home Chat have
-  no local terminal tool observation on this API. A send to such a chat usually
-  leaves no arrow. Alias and attached-dispatch cases have regression coverage.
-- Parsing accepts one direct literal `orca` command, plain send receipts or JSON,
+  and time proximity never supply an endpoint. A send into native chat or bot
+  Home Chat without a matching public terminal receipt leaves the recipient
+  unresolved. Alias and attached-dispatch cases have regression coverage.
+- A direct `ask --question ... --json` with a pending message ID or a successful
+  `reply --id ... --body/--body-file ...` supplies the sender and acceptance time.
+  A reply uses its newly returned ID. The question can be missing. Only a consuming
+  check for the returned ID supplies the recipient and retrieval time. Until then
+  these receipts stay in memory. A run-scoped check requires an explicit terminal
+  matching the hook's own terminal.
+- Parsing accepts a direct `orca` or `"$ORCA_CLI_BIN_DIR/orca"` command, plain send/reply receipts or JSON,
   and ordinary check text (first message) or JSON (up to 200). Compound shells,
   redirects, substitutions, failed calls, cross-server sends, replay commands,
   ambiguous ownership and group sends are excluded. Both tool phases must have
   matching call and terminal IDs. An unresolved receipt stays in memory for up
   to two minutes, with 512 entries per pending collection. A direct accepted
   arrow can be confirmed later while retained in the seven-day cache.
+- If two sessions report successful sends with the same message ID, the recorder
+  removes the sender and keeps a conflict flag on that ID within the message
+  cache's existing retention and size limits. A verified retrieval keeps its
+  receiver and check time. The panel shows the receiver-only diamond after that
+  check, including after a cache reload.
 - A tool hook is available on supported local terminal agents while the plugin
   runs. A command invoked in a plain shell, a native chat or on SSH/WSL does not
   give the plugin the same hook pair. For those surfaces, broader coverage needs
   a public event that carries a message ID, both stable session identities and
   the acceptance or delivery stage.
+
+### Local terminal reproduction
+
+On Orca 1.4.265 and Codex 0.171.0, a disposable desktop loaded the baseline
+(`df03861`) and candidate collectors together. Two real terminal sessions
+exercised two dispatches in the same Run. To reproduce in a test profile, use
+the coordinator and worker's own terminal tools for each exchange.
+
+1. From the coordinator terminal run `"$ORCA_CLI_BIN_DIR/orca" orchestration worker-start --spec-file <fixture> --task-title first --worktree new-child --name <name> --base-branch main --agent codex --json`.
+2. Have the worker ask one question using `orca orchestration ask --question <text> --json`.
+   Consume it in the coordinator with the supplied `check --run <run> --terminal <own-terminal>`.
+   Reply using `reply --id <question-id> --body-file <fixture> --json`.
+   Have the worker consume the reply and send its normal `worker_done`. Consume the completion.
+3. Create another task with `task-create --spec-file <fixture> --task-title second --json`.
+   Attach it with `worker-start --task <id> --terminal <same-worker-terminal> --json`.
+   Repeat the exchange using plain `reply --id <question-id> --body <text>`.
+4. Compare `activity.snapshot` with `hideShortTasks: false` on both collectors.
+   Count the unique IDs from the Run and two Dispatch inboxes. A message is
+   missing when its ID has no snapshot row. Count parent links separately.
+
+| Observed in the same two dispatches   | Baseline | Candidate |
+| ------------------------------------- | -------: | --------: |
+| Parent links for one fresh session    |        0 |         1 |
+| Additional parent links on attachment |        0 |         0 |
+| Messages with both session endpoints  |        0 |         6 |
+| Receiver-only messages                |        2 |         0 |
+| Missing messages out of six           |        4 |         0 |
+
+Both questions and both completions went from worker to coordinator. Both replies
+went in the reverse direction. Each reply had a new ID that matched the worker's
+check. The observed acceptance-to-retrieval intervals spanned 5.0–7.4 seconds.
+The CLI fenced a run-scoped consuming check from a different bound terminal and
+from an unbound terminal. The bound caller then retrieved the waiting message.
+The final parser also rejects an explicit non-terminal launch mode. Replaying
+the two captured terminal-mode receipts and six message IDs with the final
+guards produced the same endpoints and stages. A separate native repeat reached
+`start_unknown` before any exchange and produced no parent link. It contributes
+no successful dispatches or messages to the table.
+
+In this macOS terminal profile `"$ORCA_CLI_COMMAND" --version` failed, while
+`"$ORCA_CLI_BIN_DIR/orca"` ran the bundled CLI. A nested `sh -c` send returned
+a real message ID and the outer shell hook supplied no direct send evidence.
+`worker-start --item` was refused in an ordinary terminal. The option belongs
+to a bot's own chat. These tests measured local terminal sessions only. The
+availability of terminal hooks for a different client, or the cause of a
+receiver-only row in an existing installation, cannot be inferred from these counts.
+
+### Working intervals
 
 The timeline joins working observations on the same lane when the gap from one
 end to the next start is strictly below 30,000 ms. Chains can include short

@@ -7,24 +7,30 @@ const switches = new Set(['--json', '--full', '--keep-open', '--no-parent'])
 const flagsFor = {
   'orchestration send':
     '--to --from --subject --body --body-file --type --priority --thread-id --task-id --dispatch-id --outcome --files-modified --report-path --phase --chat --item --json --full',
-  'orchestration check': '--terminal --json --full',
+  'orchestration reply': '--from --id --body --body-file --json --full',
+  'orchestration ask': '--from --question --json',
+  'orchestration check': '--terminal --run --json --full',
   'orchestration worker-start':
-    '--from --terminal --agent --spec --model --effort --worktree --repo --name --json --keep-open',
+    '--from --terminal --agent --spec --spec-file --task --task-title --model --effort --worktree --repo --name --base-branch --json --keep-open',
   'agent launch': '--agent --worktree --surface --prompt --model --effort --json',
   'worktree create':
     '--name --repo --agent --prompt --model --effort --base-branch --parent-worktree --no-parent --setup --json'
 }
-const kept = new Set(['--to', '--from', '--terminal', '--surface'])
+const kept = new Set(['--to', '--from', '--terminal', '--surface', '--id', '--run'])
+// Match only the executable word. Never expand variables or accept shell wrappers.
+const executable = /^(?:orca|"\$ORCA_CLI_BIN_DIR\/orca")(?=[ \t])/
 
 export function actionOf(event) {
   if (!['Bash', 'Shell', 'exec_command'].includes(event.tool)) return
   const command = event.input?.command ?? event.input?.cmd
-  if (typeof command !== 'string' || command.length > 65536 || !command.startsWith('orca ')) return
+  if (typeof command !== 'string' || command.length > 65536) return
+  const prefix = executable.exec(command)
+  if (!prefix) return
   const words = []
   // Unquoted metacharacters, substitutions, redirection and compound commands
   // are outside this grammar. Quoted option values stay a single word.
   const word = /(?:[\w./:@%+=,-]+|'[^']*'|"[^"\\$`]*")+/gy
-  for (let index = 0; index < command.length;) {
+  for (let index = prefix[0].length; index < command.length;) {
     if (command[index] === ' ' || command[index] === '\t') {
       index++
       continue
@@ -36,7 +42,7 @@ export function actionOf(event) {
     if (words.length > 128) return
     index = word.lastIndex
   }
-  const [, group, verb, ...args] = words
+  const [group, verb, ...args] = words
   const allowed = flagsFor[group + ' ' + verb]?.split(' ')
   if (!allowed) return
   const flags = new Map()
@@ -61,8 +67,16 @@ export function actionOf(event) {
     return
   if (flags.get('--surface') === 'chat' || (verb === 'create' && !flags.has('--agent'))) return
   if (flags.has('--terminal') && !term.test(flags.get('--terminal'))) return
+  const run = flags.get('--run')
+  if (flags.has('--run') && (!flags.has('--terminal') || !/^run_[\da-f-]{1,128}$/i.test(run)))
+    return
+  const replyTo = flags.get('--id')
+  if (verb === 'reply' && !msg.test(replyTo)) return
+  if (verb === 'ask' && !flags.has('--question')) return
   return {
     verb,
+    replyTo,
+    run,
     target,
     attached: flags.get('--terminal'),
     json: flags.has('--json'),
@@ -74,9 +88,9 @@ export function receiptOf(action, event) {
   const output = event.output?.stdout ?? event.output
   if (typeof output !== 'string' || output.length > 262144 || event.output?.is_error) return
   if (!action.json) {
-    if (action.verb === 'send') {
+    if (action.verb === 'send' || action.verb === 'reply') {
       const id = /^messageId=(msg_[\da-z-]{1,128})(?=\s|$)/i.exec(output)?.[1]
-      if (id) return { id }
+      if (id && id !== action.replyTo) return { id }
     }
     if (action.verb === 'check' && !action.full) {
       const id = /^(msg_[\da-z-]{1,128}) [a-z_]+ from \S+/.exec(output)?.[1]
@@ -93,7 +107,14 @@ export function receiptOf(action, event) {
   if (response?.ok !== true || !response.result) return
   const r = response.result
   if (action.verb === 'check') {
-    if (!Array.isArray(r.messages) || r.cancelled || r.connectionLost) return
+    if (
+      !Array.isArray(r.messages) ||
+      r.cancelled ||
+      r.connectionLost ||
+      r.legacyCompatibility?.readOnly ||
+      r.legacyCompatibility?.recovery
+    )
+      return
     return {
       received: r.messages
         .slice(0, 200)
@@ -101,9 +122,13 @@ export function receiptOf(action, event) {
         .filter((id) => typeof id === 'string' && msg.test(id))
     }
   }
-  if (action.verb === 'send') {
+  if (
+    action.verb === 'send' ||
+    action.verb === 'reply' ||
+    (action.verb === 'ask' && r.pending === true)
+  ) {
     const id = r.messageId ?? r.message?.id
-    if (typeof id === 'string' && msg.test(id)) return { id }
+    if (typeof id === 'string' && msg.test(id) && id !== action.replyTo) return { id }
   }
   if (action.verb === 'launch' || action.verb === 'create') {
     const outcome = action.verb === 'create' ? r.launch?.outcome : r.outcome
@@ -117,6 +142,7 @@ export function receiptOf(action, event) {
   if (
     action.verb === 'worker-start' &&
     r.state === 'ready' &&
+    (r.mode === undefined || r.mode === 'terminal') &&
     typeof r.terminal === 'string' &&
     term.test(r.terminal) &&
     typeof r.dispatchId === 'string' &&
@@ -210,11 +236,37 @@ export class RouteEvidence {
       // A direct terminal can be cleared while mail waits. Its check must still
       // belong to the same observed session before it can upgrade this arrow.
       if (term.test(action.target) && !target) return
+      if (this.excludeConflictingSender(receipt.id, source)) return
+      const prior = this.accepted.get(receipt.id)
+      if (prior) {
+        if (prior.target?.id !== target?.id) prior.ambiguous = true
+        return
+      }
       const send = { source, target, at: this.now() }
       remember(this.accepted, receipt.id, send)
       if (target && !this.received.has(receipt.id)) this.message(receipt.id, send, target)
       this.confirm(receipt.id)
     }
+  }
+
+  excludeConflictingSender(id, source) {
+    const key = 'public-mail:' + id
+    const recorded = this.store.messages.get(key)
+    const pending = this.accepted.get(id)
+    if (!recorded?.senderConflict) {
+      if (
+        (!recorded?.from || recorded.from === source.id) &&
+        (!pending || pending.source.id === source.id)
+      )
+        return false
+      this.store.message({ id: key, senderConflict: true, at: this.now() })
+    }
+    this.accepted.delete(id)
+    return true
+  }
+
+  reconcileRestoredSenders() {
+    for (const [id, send] of this.accepted) this.excludeConflictingSender(id, send.source)
   }
 
   message(id, send, target, deliveredAt) {
@@ -239,9 +291,9 @@ export class RouteEvidence {
     const send = this.accepted.get(id)
     const check = this.received.get(id)
     if (!check) return
-    if (!send) {
+    if (!send || send.ambiguous) {
       const old = this.store.messages.get('public-mail:' + id)
-      if (!old) {
+      if (!old || old.senderConflict) {
         this.store.message({
           id: 'public-mail:' + id,
           from: null,
@@ -250,7 +302,7 @@ export class RouteEvidence {
           deliveredAt: check.at,
           type: 'Mailbox input'
         })
-      } else if (!old.deliveredAt && old.to === check.source.id) {
+      } else if (!send && !old.deliveredAt && old.to === check.source.id) {
         old.deliveredAt = check.at
         old.type = 'Mailbox received'
         this.received.delete(id)

@@ -2,9 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { RouteEvidence, actionOf } from './route-evidence.mjs'
 import { ActivityStore } from './activity-store.mjs'
+import { encodeRecorderCache, decodeRecorderCache } from './recorder-cache.mjs'
 
-function probe() {
-  const store = new ActivityStore()
+function probe(store = new ActivityStore()) {
   const owners = new Map()
   let now = Date.now()
   function add(terminal, id, createdAt = now) {
@@ -179,4 +179,273 @@ test('an identified new-worktree agent and a duplicated cross-session call ID', 
   second(accepted)
   assert.deepEqual(f.routes.attempts(), [])
   assert.equal(f.store.messages.size, 0)
+})
+
+test('a reply joins only its returned id to an independent local retrieval', () => {
+  const command = 'orca orchestration reply --id msg_123 --body-file /absent/PRIVATE --json'
+  for (const original of ['observed', 'missing']) {
+    for (const order of ['send-first', 'check-first']) {
+      const f = probe()
+      if (original === 'observed') {
+        f.hooks('term_a', send)(accepted)
+        f.hooks('term_b', check)(receipt)
+      }
+      const finish = f.hooks('term_b', command)
+      const accept = () => finish({ ok: true, result: { messageId: 'msg_answer' } })
+      const collect = () =>
+        f.hooks('term_a', 'orca orchestration check')('msg_answer status from term_b')
+      if (order === 'send-first') {
+        accept()
+        assert.equal(f.store.messages.has('public-mail:msg_answer'), false)
+        f.tick(2000)
+        collect()
+      } else {
+        collect()
+        assert.equal(f.store.messages.get('public-mail:msg_answer').from, null)
+        accept()
+      }
+      const answer = f.store.messages.get('public-mail:msg_answer')
+      assert.deepEqual(
+        [answer.from, answer.to, answer.type],
+        ['receiver', 'sender', 'Mailbox received']
+      )
+      if (order === 'send-first') assert.equal(answer.deliveredAt - answer.at, 2000)
+      if (original === 'observed')
+        assert.equal(f.store.messages.get('public-mail:msg_123').from, 'sender')
+      collect()
+      assert.deepEqual(answer, f.store.messages.get(answer.id))
+      assert.equal(f.store.messages.size, original === 'observed' ? 2 : 1)
+      assert.doesNotMatch(JSON.stringify(f.store.serialize()), /PRIVATE|--body-file/)
+    }
+  }
+})
+
+test('reply failures, original-id echoes, replays and indirect commands cannot provide a sender', () => {
+  const reply = 'orca orchestration reply --id msg_question --body answer'
+  for (const [command, result] of [
+    [reply, 'messageId=msg_question'],
+    [reply + ' --json', { ok: false, result: { messageId: 'msg_answer' } }],
+    [reply + ' --retry-request previous', 'messageId=msg_answer'],
+    [reply + ' --on remote', 'messageId=msg_answer'],
+    [reply + ' --from term_a', 'messageId=msg_answer'],
+    [reply.replace('msg_question', 'invalid'), 'messageId=msg_answer'],
+    ['sh -c "' + reply + '"', 'messageId=msg_answer'],
+    [reply.replace('orca ', '"$OTHER" '), 'messageId=msg_answer'],
+    [reply.replace('orca ', '"$ORCA_CLI_COMMAND" '), 'messageId=msg_answer'],
+    [reply.replace('orca ', '"$(command -v orca)" '), 'messageId=msg_answer']
+  ]) {
+    const f = probe()
+    f.hooks('term_b', command)(result)
+    f.hooks('term_a', 'orca orchestration check')('msg_answer status from term_b')
+    assert.equal(f.store.messages.get('public-mail:msg_answer').from, null)
+  }
+  const f = probe()
+  f.hooks('term_b', reply)('messageId=msg_answer')
+  f.tick(120001)
+  f.hooks('term_a', 'orca orchestration check')('msg_answer status from term_b')
+  assert.equal(f.store.messages.get('public-mail:msg_answer').from, null)
+})
+
+test('new and attached task starts retain their different session ownership requirements', () => {
+  for (const command of [
+    '"$ORCA_CLI_BIN_DIR/orca" orchestration worker-start --spec-file /absent/PRIVATE --task-title scoped --worktree new-child --base-branch main --agent codex --json',
+    'orca orchestration worker-start --task task_1 --agent codex --worktree current --json'
+  ]) {
+    const f = probe()
+    f.hooks(
+      'term_a',
+      command
+    )({ ok: true, result: { state: 'ready', dispatchId: 'ctx_new', terminal: 'term_new' } })
+    f.add('term_new', 'child', Date.now() + 500)
+    f.routes.refresh()
+    assert.equal(f.store.agents.get('child').parentId, 'sender')
+    assert.doesNotMatch(JSON.stringify(f.store.serialize()), /PRIVATE|--task-title/)
+  }
+  const f = probe()
+  const attach = 'orca orchestration worker-start --task task_2 --terminal term_b --json'
+  f.hooks(
+    'term_a',
+    attach
+  )({ ok: true, result: { state: 'ready', dispatchId: 'ctx_reuse', terminal: 'term_b' } })
+  f.hooks('term_a', send.replace('term_b', 'dispatch:ctx_reuse'))(accepted)
+  assert.equal(f.store.agents.get('receiver').parentId, undefined)
+  assert.equal(f.store.messages.get('public-mail:msg_123').to, 'receiver')
+  const chat = probe()
+  chat.hooks(
+    'term_a',
+    attach
+  )({
+    ok: true,
+    result: { state: 'ready', mode: 'chat', dispatchId: 'ctx_chat', terminal: 'term_b' }
+  })
+  chat.hooks('term_a', send.replace('term_b', 'dispatch:ctx_chat'))(accepted)
+  assert.equal(chat.store.messages.size, 0)
+  for (const flag of ['--item 3', '--retry-request recovery', '--on abroad']) {
+    assert.equal(
+      actionOf({ tool: 'Bash', input: { command: attach + ' ' + flag }, terminalId: 'term_a' }),
+      undefined
+    )
+  }
+})
+
+test('duplicate reply receipts preserve the first time and conflicting senders cannot fill an endpoint', () => {
+  const reply = 'orca orchestration reply --id msg_question --body answer'
+  for (const duplicate of ['term_b', 'term_c']) {
+    const f = probe()
+    f.add('term_c', 'other')
+    f.hooks('term_b', reply)('messageId=msg_answer')
+    f.tick(500)
+    f.hooks(duplicate, reply)('messageId=msg_answer')
+    f.tick(500)
+    f.hooks('term_a', 'orca orchestration check')('msg_answer status from term_b')
+    const row = f.store.messages.get('public-mail:msg_answer')
+    assert.equal(f.store.messages.size, 1)
+    assert.equal(row.from, duplicate === 'term_b' ? 'receiver' : null)
+    if (row.from) assert.equal(row.deliveredAt - row.at, 1000)
+  }
+})
+
+test('a pending question joins its exact consuming check on the coordinator terminal', () => {
+  const question = 'orca orchestration ask --question PRIVATE --json'
+  const pending = { ok: true, result: { messageId: 'msg_question', pending: true } }
+  const consume = 'orca orchestration check --run run_a12bc3 --terminal term_a --json'
+  const received = { ok: true, result: { messages: [{ id: 'msg_question' }] } }
+  const f = probe()
+  f.hooks('term_b', question)(pending)
+  for (const command of [
+    consume.replace('term_a', 'term_b'),
+    consume.replace(' --terminal term_a', ''),
+    consume.replace('run_a12bc3', 'run_unbound'),
+    consume + ' --peek',
+    consume + ' --retry-request replay'
+  ])
+    f.hooks('term_a', command)(received)
+  f.hooks(
+    'term_a',
+    consume
+  )({ ...received, result: { ...received.result, legacyCompatibility: { readOnly: true } } })
+  f.hooks('term_a', consume)({ ok: false, error: { code: 'consumer_fenced' } })
+  assert.equal(f.store.messages.size, 0)
+  f.hooks('term_a', consume)(received)
+  const row = f.store.messages.get('public-mail:msg_question')
+  assert.deepEqual([row.from, row.to, row.type], ['receiver', 'sender', 'Mailbox received'])
+  assert.doesNotMatch(JSON.stringify(f.store.serialize()), /PRIVATE|run_a12bc3/)
+  for (const [command, result] of [
+    [question + ' --wait', pending],
+    [question + ' --resume msg_other', pending],
+    [question, { ok: true, result: { messageId: 'msg_question', pending: false } }]
+  ]) {
+    const probeCase = probe()
+    probeCase.hooks('term_b', command)(result)
+    probeCase.hooks('term_a', consume)(received)
+    assert.equal(probeCase.store.messages.get(row.id).from, null)
+  }
+})
+
+const answerId = 'public-mail:msg_answer'
+const reply = 'orca orchestration reply --id msg_question --body fixture'
+const answerReceipt = 'messageId=msg_answer'
+const retrieve = 'msg_answer status from term_b'
+
+function reload(store) {
+  const saved = new ActivityStore()
+  const chunks = encodeRecorderCache(store.serialize())
+  saved.restore(decodeRecorderCache({ version: 2 }, chunks))
+  return saved
+}
+
+test('revoked senders stay unknown across hook order, cache reload and repeated recovery', () => {
+  for (const order of ['check-first', 'check-between', 'check-last']) {
+    const f = probe()
+    f.add('term_c', 'other')
+    const checkAnswer = () => f.hooks('term_a', 'orca orchestration check')(retrieve)
+    const stored = () => f.store.messages.get(answerId)
+    const first = f.hooks('term_b', reply, 'one')
+    const second = f.hooks('term_c', reply, 'two')
+    if (order === 'check-first') checkAnswer()
+    f.tick(5)
+    first(answerReceipt)
+    if (order === 'check-between') checkAnswer()
+    const checkTime = stored()?.deliveredAt
+    const older = reload(f.store)
+    f.tick(10)
+    second(answerReceipt)
+    if (order === 'check-last') {
+      assert.equal(f.store.snapshot().messages.length, 0)
+      checkAnswer()
+    }
+    const at = checkTime ?? stored().deliveredAt
+    const expectInput = (store) => {
+      const row = store.messages.get(answerId)
+      assert.deepEqual(
+        [row.from, row.to, row.type, row.at, row.deliveredAt],
+        [null, 'sender', 'Mailbox input', at, at],
+        order
+      )
+    }
+    expectInput(f.store)
+    f.tick(120001)
+    checkAnswer()
+    f.hooks('term_b', reply)(answerReceipt)
+    const restored = reload(f.store)
+    restored.recover(older)
+    restored.recover(older)
+    expectInput(restored)
+    older.recover(restored)
+    expectInput(reload(older))
+  }
+})
+
+test('cold reload distinguishes a unique sender from a conflict before or after retrieval', () => {
+  for (const alreadyChecked of [false, true]) {
+    const f = probe()
+    f.add('term_c', 'other')
+    f.hooks('term_a', send)(accepted)
+    if (alreadyChecked) f.hooks('term_b', check)(receipt)
+    const key = 'public-mail:msg_123'
+    const original = f.store.messages.get(key)
+    const saved = reload(f.store)
+    const g = probe(saved)
+    g.add('term_c', 'other')
+    g.hooks('term_a', send)(accepted)
+    assert.deepEqual(saved.messages.get(key), original)
+    g.hooks('term_c', reply)('messageId=msg_123')
+    const revoked = reload(saved)
+    if (!alreadyChecked) {
+      assert.equal(revoked.snapshot().messages.length, 0)
+      assert.equal(revoked.messages.get(key).to, null)
+      assert.equal(revoked.messages.get(key).deliveredAt, undefined)
+    }
+    const resumed = probe(revoked)
+    revoked.recover(f.store)
+    resumed.hooks('term_b', check)(receipt)
+    resumed.hooks('term_a', send)(accepted)
+    revoked.recover(f.store)
+    const row = reload(revoked).messages.get(key)
+    assert.deepEqual(
+      [row.from, row.to, row.type, row.at],
+      [null, 'receiver', 'Mailbox input', row.deliveredAt]
+    )
+    assert.ok(Number.isFinite(row.deliveredAt))
+    if (alreadyChecked) assert.equal(row.deliveredAt, original.deliveredAt)
+  }
+})
+
+test('a delayed restore reconciles a pending reply with a contrary retained sender', () => {
+  const f = probe()
+  f.add('term_c', 'other')
+  f.hooks('term_a', send)(accepted)
+  f.hooks('term_b', check)(receipt)
+  const old = reload(f.store)
+  const g = probe()
+  g.add('term_c', 'other')
+  g.hooks('term_c', reply)('messageId=msg_123')
+  g.store.recover(old)
+  g.routes.reconcileRestoredSenders()
+  g.store.recover(old)
+  const row = reload(g.store).messages.get('public-mail:msg_123')
+  assert.deepEqual(
+    [row.from, row.to, row.type, row.at],
+    [null, 'receiver', 'Mailbox input', row.deliveredAt]
+  )
 })

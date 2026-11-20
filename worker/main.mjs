@@ -101,6 +101,7 @@ export default function activate(orca) {
     const history = new ActivityStore()
     history.restore(saved)
     store.recover(history)
+    collector.relations.reconcileRestoredSenders()
     return true
   }
   const refresh = () => {

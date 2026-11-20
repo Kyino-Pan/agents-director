@@ -868,7 +868,7 @@ test('retrying a failed head read combines live mailbox retrieval and saved rela
   }
 })
 
-test('merging mail evidence is monotonic and rejects conflicting endpoint identities', () => {
+test('merging mail keeps the checked receiver and revokes contradictory senders', () => {
   const store = new ActivityStore()
   const input = {
     id: 'public-mail:msg_a',
@@ -883,8 +883,13 @@ test('merging mail evidence is monotonic and rejects conflicting endpoint identi
   const merged = store.messages.get(input.id)
   assert.deepEqual([merged.at, merged.deliveredAt, merged.type], [10, 20, 'Mailbox received'])
   store.message({ ...sent, to: 'another', at: 1 })
-  store.message({ ...sent, from: 'other', at: 5 })
   assert.deepEqual(store.messages.get(input.id), merged)
+  store.message({ ...sent, from: 'other', at: 5 })
+  const revoked = store.messages.get(input.id)
+  assert.deepEqual(
+    [revoked.from, revoked.to, revoked.type, revoked.at, revoked.deliveredAt],
+    [null, 'receiver', 'Mailbox input', 20, 20]
+  )
 })
 
 test('delayed recovery keeps parent and spawn time together across identity conflicts', () => {

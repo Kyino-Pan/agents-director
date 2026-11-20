@@ -236,9 +236,30 @@ export class ActivityStore {
       return
     }
     const prior = this.messages.get(message.id)
-    if (prior && message.id.startsWith('public-mail:')) {
-      if (prior.to !== message.to || (prior.from && message.from && prior.from !== message.from))
-        return
+    const publicMail = message.id.startsWith('public-mail:')
+    if (
+      publicMail &&
+      (prior?.senderConflict ||
+        message.senderConflict ||
+        (prior?.from && message.from && prior.from !== message.from))
+    ) {
+      // A retained conflict survives older generations and repeated receipts. Only
+      // an observed retrieval provides a recipient or a display time in this case.
+      const checks = [prior, message].filter((row) => Number.isFinite(row?.deliveredAt))
+      const to = checks[0]?.to ?? null
+      const at = checks.length
+        ? Math.min(...checks.filter((row) => row.to === to).map((row) => row.deliveredAt))
+        : Math.min(prior?.at ?? message.at, message.at)
+      message = {
+        id: message.id,
+        senderConflict: true,
+        from: null,
+        to,
+        at,
+        ...(to && { deliveredAt: at, type: 'Mailbox input' })
+      }
+    } else if (publicMail && prior) {
+      if (prior.to !== message.to) return
       const from = prior.from ?? message.from
       const received = [prior.deliveredAt, message.deliveredAt].filter(Number.isFinite)
       // Sender observations carry the acceptance time. A receiver-only marker
@@ -255,7 +276,7 @@ export class ActivityStore {
     this.messages.set(message.id, {
       ...message,
       from: message.from === null ? null : this.agent(message.from),
-      to: this.agent(message.to),
+      to: message.to === null ? null : this.agent(message.to),
       subject: String(message.subject ?? '').slice(0, 160),
       body:
         String(message.body ?? '').length > 400
