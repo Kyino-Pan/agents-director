@@ -1,6 +1,6 @@
 # Access and data handling
 
-Agents Director 0.2.1 uses Orca's documented plugin host API and its own storage.
+Agents Director uses Orca's documented plugin host API and its own storage.
 The shipped worker imports only its own modules and Node's `zlib` for bounded cache
 compression. It does not open Orca data files, read runtime credentials, connect to
 internal RPC, spawn subprocesses, read provider transcripts or scrape terminal text.
@@ -31,8 +31,16 @@ route and launch rules. Failures propagate; there is no retry through a shell,
 alternative identity, workspace or private method. Duplicate concurrent requests
 for one agent share one navigation operation.
 
-Only titles, public identities, summary counts, workspace/project metadata and
-bounded observed states are cached. A public title can include the start of a first
+Orca asks separately for the `agent.tool.before` and `agent.tool.after` hooks.
+The hooks can expose tool arguments and outputs across supported terminal agents.
+Handlers return without rewriting, denying, awaiting or running a command.
+Only recognized direct Orca routing actions are parsed, in memory. No command,
+body, subject, prompt, environment, raw output or tool call ID is saved by these
+handlers. Successful messages retain a message ID, session endpoints when known,
+stage and times. A verified child retains its parent ID and observed launch time.
+
+Titles, public identities, summary counts, workspace/project metadata and
+bounded observed states are also cached. A public title can include the start of a first
 message, as Orca documents. Conversation bodies and recent inputs are unavailable;
 no content is collected by guessing a transcript path. Text in the panel is rendered
 with `textContent`. Bundled harness artwork is the only injected SVG markup.

@@ -387,6 +387,7 @@ function workerFixture() {
   f.storageReads = []
   f.api = {
     host: f.host,
+    hooks: { on: () => ({ dispose() {} }) },
     events: {
       on: (_name, callback) => {
         f.receive = callback
@@ -745,3 +746,177 @@ for (const fault of [
     }
   })
 }
+
+test('public status changes inside a tool turn join the visible bar but preserve the bounded observations', async () => {
+  const f = fixture()
+  await f.collector.scan()
+  f.now += 5000
+  await f.collector.scan()
+  for (const [offset, state] of [
+    [5043, 'waiting'],
+    [6000, 'working'],
+    [10000, 'working']
+  ]) {
+    f.now = NOW + offset
+    f.collector.receive({
+      workspaceListId: workspace.id,
+      sessionId: row.sessionId,
+      terminalId: row.terminalId,
+      receivedAt: f.now,
+      mainAgent: { state, stateStartedAt: NOW + (state === 'waiting' ? 5043 : 6000) }
+    })
+  }
+  const segments = f.store.snapshot(f.now, { hideShortTasks: true }).agents[0].segments
+  const bridges = segments.filter((s) => s.joinedWork)
+  assert.deepEqual(
+    bridges.map((s) => [s.start - NOW, s.end - NOW, s.state]),
+    [
+      [5000, 5043, 'unknown'],
+      [5043, 6000, 'unknown']
+    ]
+  )
+  assert.ok([...f.store.points.values()].some((p) => p.state === 'waiting' && p.at === NOW + 5043))
+  assert.equal(segments.at(-1).state, 'working')
+})
+
+test('retrying a failed head read combines live mailbox retrieval and saved relationships across restart', async () => {
+  const f = workerFixture()
+  const now = Date.now()
+  const id = (session) => 'public:' + JSON.stringify([workspace.id, 'codex', session])
+  const parent = id('parent'),
+    child = id('child'),
+    mailId = 'public-mail:msg_retry'
+  const cache = new ActivityStore(now - 4000)
+  f.rows = ['parent', 'child'].map((session) => ({
+    ...row,
+    sessionId: session,
+    terminalId: 'term_' + session
+  }))
+  f.sessions = []
+  for (const agent of f.rows) {
+    cache.agent(id(agent.sessionId), {
+      workspace: workspace.id,
+      provider: agent.agent,
+      sessionId: agent.sessionId
+    })
+    cache.point(
+      'p' + agent.sessionId,
+      id(agent.sessionId),
+      now - 4000,
+      'working',
+      'live',
+      now - 2000
+    )
+  }
+  cache.agent(child, { parentId: parent, spawnedAt: now - 3000 })
+  cache.message({ id: mailId, from: parent, to: child, type: 'Send accepted', at: now - 1500 })
+  const key = STORAGE_PREFIX + ':head'
+  f.storage.set(key, { version: 2, generation: 'a', chunks: 1 })
+  f.storage.set(
+    STORAGE_PREFIX + ':a:0',
+    deflateSync(JSON.stringify(cache.serialize())).toString('base64')
+  )
+  const read = f.api.storage.get
+  let fail = true
+  f.api.storage.get = async (k) => {
+    if (k === key && fail) {
+      fail = false
+      throw new Error('test head read failure')
+    }
+    return read(k)
+  }
+  const hooks = new Map()
+  f.api.hooks.on = (name, handler) => {
+    hooks.set(name, handler)
+    return { dispose() {} }
+  }
+  try {
+    activate(f.api)
+    const snapshot = () => f.handlers.get('activity.snapshot')({ hideShortTasks: false })
+    await snapshot()
+    const event = {
+      agent: 'codex',
+      terminalId: 'term_child',
+      callId: 'check',
+      tool: 'Bash',
+      input: { command: 'orca orchestration check --terminal term_child --json' }
+    }
+    hooks.get('agent.tool.before')(event)
+    hooks.get('agent.tool.after')({
+      ...event,
+      output: JSON.stringify({ ok: true, result: { messages: [{ id: 'msg_retry' }] } })
+    })
+    assert.equal((await snapshot()).messages[0].from, null)
+    await f.handlers.get('refresh')()
+    for (const restart of [false, true]) {
+      if (restart) {
+        await deactivate()
+        activate(f.api)
+      }
+      const data = await snapshot()
+      const childRow = data.agents.find((a) => a.id === child)
+      const mail = data.messages.find((m) => m.id === mailId)
+      assert.deepEqual([childRow.parentId, childRow.spawnedAt], [parent, now - 3000])
+      assert.deepEqual(
+        [mail.from, mail.to, mail.type, mail.at],
+        [parent, child, 'Mailbox received', now - 1500]
+      )
+      assert.ok(mail.deliveredAt >= now)
+    }
+  } finally {
+    await deactivate()
+  }
+})
+
+test('merging mail evidence is monotonic and rejects conflicting endpoint identities', () => {
+  const store = new ActivityStore()
+  const input = {
+    id: 'public-mail:msg_a',
+    from: null,
+    to: 'receiver',
+    at: 20,
+    deliveredAt: 20,
+    type: 'Mailbox input'
+  }
+  const sent = { id: input.id, from: 'sender', to: 'receiver', at: 10, type: 'Send accepted' }
+  for (const row of [input, sent, sent]) store.message(row)
+  const merged = store.messages.get(input.id)
+  assert.deepEqual([merged.at, merged.deliveredAt, merged.type], [10, 20, 'Mailbox received'])
+  store.message({ ...sent, to: 'another', at: 1 })
+  store.message({ ...sent, from: 'other', at: 5 })
+  assert.deepEqual(store.messages.get(input.id), merged)
+})
+
+test('delayed recovery keeps parent and spawn time together across identity conflicts', () => {
+  const live = new ActivityStore()
+  const saved = new ActivityStore()
+  live.agent('child', { sessionId: 's', workspace: 'w', parentId: 'new-parent', spawnedAt: 200 })
+  saved.agent('child', {
+    sessionId: 's',
+    workspace: 'w',
+    parentId: 'old-parent',
+    spawnedAt: 100,
+    totalTokens: 42
+  })
+  live.agent('ambiguous', { sessionId: 'new-session' })
+  saved.agent('ambiguous', { sessionId: 'old-session' })
+  saved.agent('other', { parentId: 'ambiguous', spawnedAt: 88 })
+  saved.message({
+    id: 'public-mail:msg_conflict',
+    from: 'ambiguous',
+    to: 'child',
+    at: 77,
+    type: 'Send accepted'
+  })
+  live.recover(saved)
+  assert.deepEqual(
+    [
+      live.agents.get('child').parentId,
+      live.agents.get('child').spawnedAt,
+      live.agents.get('child').totalTokens
+    ],
+    ['new-parent', 200, 42]
+  )
+  assert.equal(live.agents.get('other').parentId, undefined)
+  assert.equal(live.messages.size, 0)
+})

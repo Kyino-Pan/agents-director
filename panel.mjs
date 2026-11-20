@@ -198,15 +198,17 @@ function render() {
     (message) =>
       message.at >= start &&
       message.at <= end &&
-      rowById.has(message.from) &&
+      (message.from === null || rowById.has(message.from)) &&
       rowById.has(message.to)
   )
-  if (
-    selection &&
-    ((selection.agent && !rowById.has(selection.agent)) ||
-      (selection.message && !messages.some((message) => message.id === selection.message)))
-  ) {
-    selection = null
+  if (selection?.agent && !rowById.has(selection.agent)) selection = null
+  if (selection?.message) {
+    const visible = new Set(messages.map((item) => item.id))
+    if (!visible.has(selection.message)) {
+      const surviving = selection.messages.find((id) => visible.has(id))
+      if (surviving) selection.message = surviving
+      else selection = null
+    }
   }
   $('summary').textContent =
     `${active.length} of ${snapshot.agents.length} agents · ${messages.length} coordination messages`
@@ -300,7 +302,17 @@ function render() {
       'stroke-width': 1.5
     })
   )
-  defs.append(marker)
+  const spawnEnd = svg('marker', {
+    id: 'spawn-arrow',
+    viewBox: '0 0 8 8',
+    refX: 7,
+    refY: 4,
+    markerWidth: 4,
+    markerHeight: 4,
+    orient: 'auto'
+  })
+  spawnEnd.append(svg('path', { d: 'M 0 1 L 7 4 L 0 7 Z', fill: 'var(--orca-muted-foreground)' }))
+  defs.append(marker, spawnEnd)
   chart.replaceChildren(defs)
   $('axis').replaceChildren()
   const ticks = Math.max(1, Math.min(6, Math.floor((width - padding * 2) / 100)))
@@ -327,6 +339,31 @@ function render() {
   }
   const segments = svg('g')
   agents.forEach((agent) => {
+    // Draw one continuous bar underneath the original segment hit targets.
+    // Their labels and click details still describe the actual short transitions.
+    let run
+    for (const segment of agent.segments) {
+      if (segment.end <= start || segment.start >= end) continue
+      if (segment.state !== 'working' && !segment.joinedWork) {
+        run = null
+        continue
+      }
+      if (!run || run.end !== segment.start) run = { left: x(Math.max(start, segment.start)) }
+      run.end = segment.end
+      if (segment.joinedWork && !run.rect) {
+        run.rect = svg('rect', {
+          x: run.left,
+          y: center(agent.id) - 3,
+          height: 6,
+          rx: 1,
+          class: 'working run-bar',
+          'data-agent': agent.id,
+          'aria-hidden': true
+        })
+        segments.append(run.rect)
+      }
+      run.rect?.setAttribute('width', x(Math.min(end, segment.end)) - run.left)
+    }
     agent.segments.forEach((segment, index) => {
       if (segment.end <= start || segment.start >= end) {
         return
@@ -334,6 +371,7 @@ function render() {
       const left = x(Math.max(start, segment.start))
       const barWidth = Math.max(0, x(Math.min(end, segment.end)) - left)
       const state = stateOf(segment)
+      const paint = segment.joinedWork ? 'working' : state
       const key = `segment:${agent.id}:${segment.start}:${index}`
       const label = `${agentName(agent)}: ${stateLabel(state)}, ${dateFormat.format(segment.start)} to ${timeFormat.format(segment.end)}, ${duration(segment.end - segment.start)}`
       const group = svg('g', {
@@ -357,11 +395,11 @@ function render() {
         }),
         svg('rect', {
           x: left,
-          y: center(agent.id) - (state === 'unknown' ? 1 : 3),
+          y: center(agent.id) - (paint === 'unknown' ? 1 : 3),
           width: barWidth,
-          height: state === 'unknown' ? 2 : 6,
+          height: paint === 'unknown' ? 2 : 6,
           rx: 1,
-          class: `segment ${state}${segment.end >= end ? ' current' : ''}`
+          class: `segment ${paint}${segment.end >= end ? ' current' : ''}`
         })
       )
       segments.append(group)
@@ -383,6 +421,8 @@ function render() {
     chart.append(
       svg('path', {
         class: 'spawn',
+        'marker-end': 'url(#spawn-arrow)',
+        'aria-label': `Spawn: ${agentName(agents[rowById.get(agent.parentId)])} → ${agentName(agent)}`,
         'data-from': agent.parentId,
         'data-to': agent.id,
         'data-x': at,
@@ -401,15 +441,28 @@ function render() {
   for (const bin of messageBins.values()) {
     const message = bin[0]
     const at = x(message.at)
-    const from = center(message.from)
     const to = center(message.to)
+    const input = message.from === null
+    const from = input ? to : center(message.from)
     const path = messagePath(at, from, to)
-    const fromName = agentName(agents[rowById.get(message.from)])
+    const fromName = input ? 'Mailbox input' : agentName(agents[rowById.get(message.from)])
     const toName = agentName(agents[rowById.get(message.to)])
-    const label = `${fromName} to ${toName}, ${timeFormat.format(message.at)}: ${message.subject || message.type}`
+    const counts = new Map()
+    for (const item of bin) counts.set(item.type, (counts.get(item.type) ?? 0) + 1)
+    const mixed = counts.size > 1
+    const summary =
+      bin.length === 1
+        ? message.subject || message.type
+        : [...counts].map(([type, count]) => `${count} ${type}`).join(', ')
+    const label = `${fromName} to ${toName}, ${timeFormat.format(message.at)}: ${summary}`
+    const ids = bin.map((item) => item.id)
+    if (selection?.message && ids.includes(selection.message)) {
+      selection.key = 'message:' + message.id
+      selection.messages = ids
+    }
     const group = svg('g', {
       class: 'message-target',
-      'data-from': message.from,
+      ...(input ? { 'data-agent': message.to } : { 'data-from': message.from }),
       'data-to': message.to,
       'data-x': at,
       role: 'button',
@@ -417,13 +470,26 @@ function render() {
       'aria-label': label,
       'data-key': `message:${message.id}`,
       'data-message': message.id,
-      'data-message-ids': JSON.stringify(bin.map((item) => item.id))
+      'data-status': mixed ? 'Mixed' : message.type,
+      'data-message-ids': JSON.stringify(ids)
     })
     group.append(
       svg('title', {}, label),
-      svg('path', { d: path, class: 'message-hit' }),
-      svg('path', { d: path, class: 'message-path', 'marker-end': 'url(#message-arrow)' }),
-      svg('circle', { cx: at, cy: from === to ? from - 12 : from, r: 2, class: 'message-dot' })
+      ...(input
+        ? [
+            svg('circle', { cx: at, cy: to, r: 7, fill: 'transparent' }),
+            svg('path', { d: `M ${at} ${to - 4} l 4 4 -4 4 -4 -4 Z`, class: 'mailbox-input' })
+          ]
+        : [
+            svg('path', { d: path, class: 'message-hit' }),
+            svg('path', { d: path, class: 'message-path', 'marker-end': 'url(#message-arrow)' }),
+            svg('circle', {
+              cx: at,
+              cy: from === to ? from - 12 : from,
+              r: 2,
+              class: 'message-dot'
+            })
+          ])
     )
     if (bin.length > 1) {
       group.append(

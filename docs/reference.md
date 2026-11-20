@@ -26,8 +26,7 @@ session identity can show observed states, but cannot be resumed by this plugin.
 - Pause view freezes inspection while collection continues.
 - Hide short tasks filters only reliably finished executions below three minutes.
   Incomplete history remains visible. Session summaries alone never prove a short task.
-- Sort by recent activity. Shorter links and relation rendering remain compatible
-  with synthetic fixtures; the public API supplies no new relationship observations.
+- Sort by recent activity or choose Shorter links to group related lanes.
 - Right-click → Data sources shows collection errors, truncation and coverage.
 - Layout preferences use the plugin's own storage.
 
@@ -79,12 +78,69 @@ The panel retains its existing budgets (160 lanes, 4,000 segments, 600 messages)
 and the recorder bounds points/messages at 5,000 each. These are coverage limits,
 not evidence that omitted sessions did not run.
 
-**Unavailable through the public API:** orchestration messages/parent-child links,
-conversation bodies and recent user inputs, process memory, original command
-arguments and private execution metadata. The recent-input section explains that
+**Other coverage limits.** There is no public coordination history feed. Conversation
+bodies, recent user inputs, process memory and private execution metadata are unavailable. The recent-input section explains that
 conversation text is unavailable. No terminal screen scraping is used to infer it.
 No CLI subprocess, internal RPC, runtime token, database or provider transcript is
 read by the worker.
+
+## Coordination
+
+Orca 1.4.265 was tested with local Codex 0.171.0 on macOS. A disposable Orca
+profile hosted the plugin and test terminals. One Codex session ran
+`orca agent launch --agent codex --surface terminal --prompt ... --json`, then
+`orca orchestration send --to term_… --subject ... --body ... --json`. The receiver
+ran the ordinary `orca orchestration check --terminal term_…`. The public tool
+hooks reported `agent: codex`, `tool: Bash`, `terminalId`, `callId`, an
+`input.command` string and, after the call, a string `output`. The JSON send
+receipt contained `ok: true` and `result.messageId`. The receiver's default text
+header contained the same ID. Neither `terminal.send` nor `agent.prompt.before`
+was needed to establish these relationships.
+
+The screenshot shows two real local Codex terminals on an isolated Orca desktop.
+The lower session launched the upper session and then sent it a test message.
+The solid curve marks the launch. The dotted vertical line with an open arrowhead
+marks the message retrieved by the upper session. The capture used the normal
+Agents Director custom editor at five-minute zoom and `orca plugin shot`.
+
+![Native Orca panel showing local test messages and new sessions](../assets/local-coordination.png)
+
+- A dotted send attempt can appear while a directly addressed call is in progress.
+  It expires in memory. A successful single-message receipt records acceptance.
+  An ordinary mailbox check reporting that ID confirms retrieval at the receiver.
+  The arrow stays at the send receipt time. Its detail gives the retrieval time.
+  A diamond denotes a confirmed mailbox input when the sender is unobserved.
+- New-terminal JSON receipts from `agent launch`, `worktree create --agent` and ready `orchestration worker-start`
+  receipts can supply a child handle. A solid curve requires its first observed
+  public session identity and a public session creation time at or after the
+  launch began. An attached existing worker can establish a dispatch address.
+  It cannot create a parent relationship. `agent resume` is excluded.
+- Sender and receiver identities come from the live terminal inventory and status
+  changes. An observed ready dispatch can resolve `dispatch:…` to the same live
+  terminal session. For a bot, run, implicit mailbox or unmapped dispatch, a matching
+  send and receiver check ID can join the two observed terminals. Names, task titles
+  and time proximity never supply an endpoint. Native chat and bot Home Chat have
+  no local terminal tool observation on this API. A send to such a chat usually
+  leaves no arrow. Alias and attached-dispatch cases have regression coverage.
+- Parsing accepts one direct literal `orca` command, plain send receipts or JSON,
+  and ordinary check text (first message) or JSON (up to 200). Compound shells,
+  redirects, substitutions, failed calls, cross-server sends, replay commands,
+  ambiguous ownership and group sends are excluded. Both tool phases must have
+  matching call and terminal IDs. An unresolved receipt stays in memory for up
+  to two minutes, with 512 entries per pending collection. A direct accepted
+  arrow can be confirmed later while retained in the seven-day cache.
+- A tool hook is available on supported local terminal agents while the plugin
+  runs. A command invoked in a plain shell, a native chat or on SSH/WSL does not
+  give the plugin the same hook pair. For those surfaces, broader coverage needs
+  a public event that carries a message ID, both stable session identities and
+  the acceptance or delivery stage.
+
+The timeline joins working observations on the same lane when the gap from one
+end to the next start is strictly below 30,000 ms. Chains can include short
+waiting, blocked and unknown intervals. A completion ends a chain, including
+a zero-duration completion. Each interval keeps its observed state and source in
+the detail view. A leading or trailing gap stays unknown. Display duration is
+considered before hiding completed tasks shorter than three minutes.
 
 ## Cache and upgrade
 

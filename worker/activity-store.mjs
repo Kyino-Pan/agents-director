@@ -235,9 +235,26 @@ export class ActivityStore {
     if (!message.id || !Number.isFinite(message.at)) {
       return
     }
+    const prior = this.messages.get(message.id)
+    if (prior && message.id.startsWith('public-mail:')) {
+      if (prior.to !== message.to || (prior.from && message.from && prior.from !== message.from))
+        return
+      const from = prior.from ?? message.from
+      const received = [prior.deliveredAt, message.deliveredAt].filter(Number.isFinite)
+      // Sender observations carry the acceptance time. A receiver-only marker
+      // carries its check time, which can arrive in either callback order.
+      const sendTimes = [prior, message].filter((row) => row.from).map((row) => row.at)
+      message = {
+        ...message,
+        from,
+        at: sendTimes.length ? Math.min(...sendTimes) : Math.min(prior.at, message.at),
+        type: !from ? 'Mailbox input' : received.length ? 'Mailbox received' : 'Send accepted',
+        ...(received.length && { deliveredAt: Math.min(...received) })
+      }
+    }
     this.messages.set(message.id, {
       ...message,
-      from: this.agent(message.from),
+      from: message.from === null ? null : this.agent(message.from),
       to: this.agent(message.to),
       subject: String(message.subject ?? '').slice(0, 160),
       body:
@@ -356,7 +373,7 @@ export class ActivityStore {
   }
 
   // Raw consumers retain the unfiltered view; panel/preview endpoints supply the preference.
-  snapshot(now = Date.now(), { hideShortTasks = false } = {}) {
+  snapshot(now = Date.now(), { hideShortTasks = false, attempts = [] } = {}) {
     this.prune(now)
     const windowStart = now - WINDOW_MS
     const grouped = new Map()
@@ -408,19 +425,31 @@ export class ActivityStore {
             points.push(point)
           }
         }
-        if (hideShortTasks && isFinishedShortTask(agent, ordered)) {
-          hiddenShortTasks++
-          return null
-        }
+
         const segments = []
+        let lastWorkEnd = null
+        let firstGap = 0
+        let displayWork = 0
+        const canJoin = !agent.id.startsWith('public-terminal:')
         for (let index = 0; index < points.length; index++) {
           const point = points[index]
           const next = points[index + 1]?.at ?? now
           const end = Math.min(now, next, point.until ?? next)
           const start = Math.max(windowStart, point.at)
+          // Completion is a boundary even when a point occupies zero pixels.
+          if (point.state === 'done') lastWorkEnd = null
+          if (point.state === 'working' && start <= end) {
+            if (canJoin && lastWorkEnd !== null && start - lastWorkEnd < 30_000) {
+              for (let i = firstGap; i < segments.length; i++) segments[i].joinedWork = true
+              displayWork += start - lastWorkEnd
+            }
+            displayWork += end - start
+            lastWorkEnd = end
+          }
           if (end > start) {
             segments.push({ start, end, state: point.state, source: point.source })
           }
+          if (point.state === 'working') firstGap = segments.length
           if (end < Math.min(next, now)) {
             segments.push({
               start: Math.max(windowStart, end),
@@ -429,6 +458,10 @@ export class ActivityStore {
               source: 'gap'
             })
           }
+        }
+        if (hideShortTasks && displayWork < SHORT_TASK_MS && isFinishedShortTask(agent, ordered)) {
+          hiddenShortTasks++
+          return null
         }
         return { ...agent, ...this.projectFor(agent), segments }
       })
@@ -445,8 +478,13 @@ export class ActivityStore {
       return { ...agent, segments }
     })
     const ids = new Set(visible.map((agent) => agent.id))
-    const messages = [...this.messages.values()]
-      .filter((message) => message.at <= now && ids.has(message.from) && ids.has(message.to))
+    const messages = [...this.messages.values(), ...attempts]
+      .filter(
+        (message) =>
+          message.at <= now &&
+          (message.from === null || ids.has(message.from)) &&
+          ids.has(message.to)
+      )
       .sort((a, b) => a.at - b.at)
     return {
       now,
@@ -469,6 +507,57 @@ export class ActivityStore {
       collectingSince: this.collectingSince,
       collectedUntil: this.collectedUntil
     }
+  }
+
+  recover(history) {
+    const conflicts = new Set()
+    for (const [id, recorded] of history.agents) {
+      const live = this.agents.get(id)
+      if (
+        live &&
+        ['sessionId', 'workspace', 'provider'].some(
+          (field) => live[field] && recorded[field] && live[field] !== recorded[field]
+        )
+      )
+        conflicts.add(id)
+    }
+    for (const [id, recorded] of history.agents) {
+      if (conflicts.has(id)) continue
+      const live = this.agents.get(id)
+      if (!live && !conflicts.has(recorded.parentId)) {
+        this.agents.set(id, recorded)
+        continue
+      }
+      const { parentId, spawnedAt, ...details } = recorded
+      // Session metadata absent from the first inventory (e.g. history totals)
+      // survives recovery; a newly observed route or summary takes precedence.
+      const merged = { ...details, ...live }
+      if (live && namePriority(recorded) > namePriority(live)) {
+        merged.label = recorded.label
+        merged.labelSource = recorded.labelSource
+      }
+      this.agents.set(id, merged)
+      if (
+        parentId &&
+        Number.isFinite(spawnedAt) &&
+        !conflicts.has(parentId) &&
+        (!live?.parentId || live.parentId === parentId)
+      ) {
+        this.agent(id, { parentId, spawnedAt })
+      }
+    }
+    for (const [alias, id] of history.aliases) {
+      if (!this.aliases.has(alias) && !conflicts.has(id)) this.aliases.set(alias, id)
+    }
+    for (const [id, point] of history.points) {
+      if (!this.points.has(id) && !conflicts.has(point.agentId)) this.points.set(id, point)
+    }
+    for (const [id, mail] of history.messages) {
+      if (conflicts.has(mail.from) || conflicts.has(mail.to)) continue
+      if (!this.messages.has(id)) this.messages.set(id, mail)
+      else if (id.startsWith('public-mail:')) this.message(mail)
+    }
+    this.collectingSince = Math.min(this.collectingSince, history.collectingSince)
   }
 
   restore(saved, now = Date.now()) {

@@ -39,6 +39,12 @@ export default function activate(orca) {
   }
   const subscription = orca.events.on('agent.status.changed', receive)
 
+  const hooks = ['before', 'after'].map((phase) =>
+    orca.hooks.on('agent.tool.' + phase, (event) => {
+      if (initialized && !closing) collector.relations.observe(phase, event)
+    })
+  )
+
   const persist = () => {
     saving = saving
       .catch(() => {})
@@ -94,12 +100,7 @@ export default function activate(orca) {
     // A previous host read failed. Keep observations collected while storage was offline.
     const history = new ActivityStore()
     history.restore(saved)
-    for (const field of ['agents', 'aliases', 'points', 'messages']) {
-      for (const [id, value] of history[field]) {
-        if (!store[field].has(id)) store[field].set(id, value)
-      }
-    }
-    store.collectingSince = Math.min(store.collectingSince, history.collectingSince)
+    store.recover(history)
     return true
   }
   const refresh = () => {
@@ -128,7 +129,10 @@ export default function activate(orca) {
   let ready
   orca.panels.handle('activity.snapshot', async (input) => {
     await ready
-    return store.snapshot(Date.now(), { hideShortTasks: input?.hideShortTasks !== false })
+    return store.snapshot(Date.now(), {
+      hideShortTasks: input?.hideShortTasks !== false,
+      attempts: collector.relations.attempts()
+    })
   })
   orca.panels.handle('activity.inputs', async (input) => ({
     agentId: input?.agentId,
@@ -158,6 +162,7 @@ export default function activate(orca) {
     closing = true
     clearTimeout(timer)
     subscription.dispose()
+    for (const hook of hooks) hook.dispose()
     await ready
     clearTimeout(timer)
     await scanning

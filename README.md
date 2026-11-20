@@ -10,6 +10,7 @@ between every workspace.
 - **Observed history:** retain seven days of states collected through Orca's public
   plugin API. Session history supplies titles and counts; earlier execution states
   and offline gaps stay unknown.
+- **Coordination:** solid curves connect verified parent and child sessions. Dashed arrows show accepted mail and confirmed mailbox retrieval. A diamond marks mail retrieved with an unknown sender. [Live capture and coverage](docs/reference.md#coordination)
 - **Focus by time:** zoom, pan or select a range, filter lanes and pause the view.
 - **Quick navigation:** Command-click on macOS, Ctrl-click elsewhere, or use the
   context menu to focus a matching terminal or resume its saved session in the
@@ -19,8 +20,9 @@ between every workspace.
 
 Version 0.2.0 replaces the private-file collector with public APIs to address
 [Orca's review feedback](https://github.com/Kyino-Pan/agents-director/issues/11).
-The API does not expose orchestration messages, spawn relationships, conversation
-text or process memory, so this version cannot collect those details. Old screenshots
+Orca exposes live tool hooks on supported local terminals. The collector can recognize
+specific send, mailbox check and new-agent receipts there. Earlier coordination,
+conversation text and process memory remain unavailable. Old screenshots
 and the cover artwork illustrate the earlier collector and are not current feature
 claims. The old recorder cache and custom data-directory setting are not imported;
 public collection starts a new history, alongside the public session summaries.
@@ -39,6 +41,7 @@ Approve the access request, then open **tab-bar + → Agents Director** or the
 
 Requested capabilities: read agents, workspaces and session history; focus
 workspaces/terminals; resume saved agents; and use the plugin's own storage.
+Orca also asks for the two agent tool hooks used to observe local coordination.
 Resuming happens only after a navigation action. Collection does not start agents.
 
 Free, MIT-licensed community plugin. Uses documented host APIs and its own storage;
