@@ -1,6 +1,6 @@
 # Access and data handling
 
-Agents Director 0.2.0 uses Orca's documented plugin host API and its own storage.
+Agents Director 0.2.1 uses Orca's documented plugin host API and its own storage.
 The shipped worker imports only its own modules and Node's `zlib` for bounded cache
 compression. It does not open Orca data files, read runtime credentials, connect to
 internal RPC, spawn subprocesses, read provider transcripts or scrape terminal text.
@@ -37,8 +37,8 @@ message, as Orca documents. Conversation bodies and recent inputs are unavailabl
 no content is collected by guessing a transcript path. Text in the panel is rendered
 with `textContent`. Bundled harness artwork is the only injected SVG markup.
 
-The public cache uses a separate storage namespace. Old private-source cache entries
-remain untouched, are never read and cannot supply a navigation route. Cache data is
+The public cache uses a separate storage namespace. The worker deletes obsolete private-source
+recorder keys by name without reading their values. Cache data is
 bounded to 1.8 MiB compressed and 32 MiB decoded. Snapshot budgets and seven-day
 retention also apply. The worker has no telemetry and makes no external requests.
 The synthetic browser preview reads only repository assets.

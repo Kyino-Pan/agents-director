@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { createHash } from 'node:crypto'
+import { deflateSync, inflateSync } from 'node:zlib'
 import { ActivityStore, WINDOW_MS } from './activity-store.mjs'
 import { PublicCollector } from './public-collector.mjs'
 import { createPublicNavigator } from './public-navigation.mjs'
@@ -290,7 +292,7 @@ test('unknown terminal identities are not reused after closure or restart', asyn
   await f.collector.scan()
   assert.equal(f.store.agents.size, 2)
   assert.notEqual([...f.collector.live.values()][0].agentId, first)
-  await assert.rejects(f.navigate({ agentId: first }), /No public session identity/)
+  await assert.rejects(f.navigate({ agentId: first }), /public session ID/)
 })
 
 test('history failure and truncation are visible and summaries older than seven days are omitted', async () => {
@@ -394,6 +396,7 @@ function workerFixture() {
     panels: { handle: (name, handler) => f.handlers.set(name, handler), post() {} },
     commands: { register: (name, handler) => f.handlers.set(name, handler) },
     storage: {
+      keys: async () => [...f.storage.keys()],
       get: async (key) => {
         f.storageReads.push(key)
         return f.storage.get(key)
@@ -413,8 +416,16 @@ function workerFixture() {
 
 test('worker lifecycle persists only public observations and restores without bridging offline time', async () => {
   const f = workerFixture()
+  f.storage.clear() // First install has neither a recorder head nor any preference keys.
   try {
     await activate(f.api)
+    await f.handlers.get('activity.snapshot')({})
+    assert.equal(f.storage.size, 0)
+    await f.handlers.get('refresh')()
+    assert.deepEqual([...f.storage.keys()].sort(), [
+      `${STORAGE_PREFIX}:a:0`,
+      `${STORAGE_PREFIX}:head`
+    ])
     const inputs = await f.handlers.get('activity.inputs')({ agentId: 'anything' })
     assert.deepEqual(inputs.inputs, [])
     assert.equal(inputs.unavailable, true)
@@ -451,8 +462,286 @@ test('corrupt public cache and denied host calls leave the worker responsive wit
     const snapshot = await f.handlers.get('activity.snapshot')({})
     assert.deepEqual(snapshot.agents, [])
     assert.equal(snapshot.sources.find((s) => s.name === 'Workspaces').status, 'error')
-    assert.equal(snapshot.sources.find((s) => s.name === 'Recorder cache').status, 'ok')
+    assert.equal(snapshot.sources.find((s) => s.name === 'Recorder cache').status, 'error')
   } finally {
     await deactivate()
   }
 })
+
+test('an upgrade near the host quota restores the committed public history across a failed write and retry', async () => {
+  const f = workerFixture()
+  const quota = 5 * 1024 * 1024
+  const bytes = (data) => Buffer.byteLength(JSON.stringify(Object.fromEntries(data), null, 2))
+  const key = (generation, index) => `${STORAGE_PREFIX}:${generation}:${index}`
+  const headKey = `${STORAGE_PREFIX}:head`
+  // Build a v0.2.0 snapshot independently of the new writer, close to its 1,800 KiB limit.
+  const now = Date.now()
+  const oldStore = new ActivityStore(now - 1000)
+  const oldCollector = new PublicCollector(oldStore, {}, () => now)
+  for (let i = 0; i < 2440; i++) {
+    const identity = createHash('shake256', { outputLength: 255 })
+      .update(String(i))
+      .digest('base64')
+    oldCollector.observe(
+      workspace,
+      {
+        ...row,
+        terminalId: `term-${i}`,
+        title: identity.slice(0, 160),
+        sessionId: identity.slice(160)
+      },
+      now
+    )
+  }
+  const old = oldStore.serialize()
+  const encoded = deflateSync(JSON.stringify(old)).toString('base64')
+  assert.ok(encoded.length > 1750 * 1024 && encoded.length <= 1800 * 1024)
+  const chunks = encoded.match(/.{1,24000}/g)
+  const head = { version: 2, generation: 'a', chunks: chunks.length }
+  chunks.forEach((chunk, i) => f.storage.set(key('a', i), chunk))
+  f.storage.set(headKey, head)
+  const preferences = new Map([
+    ['view:window-hours', 72],
+    ['activity-v1:preferences', { label: '自定义' }],
+    [`${STORAGE_PREFIX}:b:notes`, 'keep']
+  ])
+  for (const [k, v] of preferences) f.storage.set(k, v)
+  const legacy = JSON.stringify({ agents: [{ id: 'legacy', label: '"'.repeat(400000) }] })
+  const legacyChunks = legacy.match(/.{1,24000}/g)
+  f.storage.set('activity-v1:head', { version: 1, generation: 'a', chunks: legacyChunks.length })
+  legacyChunks.forEach((chunk, i) => f.storage.set(`activity-v1:a:${i}`, chunk))
+  f.storage.set(key('a', chunks.length), 'old public tail')
+  // Orphans left by the 0.2.0 writer. Stop within one chunk of Orca's file-size cap.
+  for (let i = 0; i < chunks.length; i++) {
+    f.storage.set(key('b', i), chunks[i])
+    if (bytes(f.storage) > quota) {
+      f.storage.delete(key('b', i))
+      break
+    }
+  }
+  assert.ok(bytes(f.storage) <= quota && bytes(f.storage) > quota - 25000)
+
+  let offline = false
+  let interrupt = true
+  let failRead = false
+  let peak = 0
+  const online = () => {
+    if (offline) throw new Error('Worker disconnected')
+  }
+  f.api.storage = {
+    keys: async () => {
+      online()
+      return [...f.storage.keys()]
+    },
+    get: async (k) => {
+      online()
+      f.storageReads.push(k)
+      if (failRead && k === key('a', 1)) throw new Error('Temporary read failure')
+      return f.storage.get(k) ?? null
+    },
+    delete: async (k) => {
+      online()
+      f.storage.delete(k)
+    },
+    set: async (k, v) => {
+      online()
+      const next = new Map(f.storage).set(k, v)
+      const size = bytes(next)
+      assert.ok(next.size <= 1024 && Buffer.byteLength(JSON.stringify(v)) <= 256 * 1024)
+      if (size > quota) throw new Error('Storage exceeds 5 MiB')
+      peak = Math.max(peak, size)
+      f.storage.set(k, v)
+      if (interrupt && k === key('b', 2)) {
+        offline = true
+        throw new Error('Worker disconnected')
+      }
+    }
+  }
+  const committed = () => {
+    const h = f.storage.get(headKey)
+    const data = Array.from({ length: h.chunks }, (_, i) =>
+      f.storage.get(key(h.generation, i))
+    ).join('')
+    return JSON.parse(inflateSync(Buffer.from(data, 'base64')))
+  }
+  const cacheStatus = async () =>
+    (await f.handlers.get('activity.snapshot')({ hideShortTasks: false })).sources.find(
+      (s) => s.name === 'Recorder cache'
+    )
+  try {
+    await activate(f.api)
+    assert.equal((await cacheStatus()).status, 'error')
+    assert.deepEqual(f.storage.get(headKey), head)
+    assert.deepEqual(committed(), old)
+    assert.equal(f.storage.has('activity-v1:head'), false)
+    assert.equal(f.storage.has('activity-v1:a:0'), false)
+    assert.equal(f.storage.has(key('a', chunks.length)), false)
+    assert.equal(f.storage.has(key('b', 2)), true)
+    assert.equal(f.storage.has(key('b', 3)), false)
+    await deactivate() // The disconnected worker cannot finish or clean up its write.
+
+    offline = false
+    interrupt = false
+    // Reserve unrelated storage so that two generations just fit, then push them over quota.
+    const twoGenerations = new Map(f.storage)
+    chunks.forEach((chunk, i) => twoGenerations.set(key('b', i), chunk))
+    let spare = quota - bytes(twoGenerations) - 16000
+    for (let i = 0; spare > 0; i++) {
+      const k = `unrelated:${i}`
+      const length = Math.min(200000, spare)
+      const value = 'x'.repeat(length)
+      f.storage.set(k, value)
+      preferences.set(k, value)
+      spare -= length
+    }
+    f.storage.set('unrelated:pressure', 'x'.repeat(32000))
+    failRead = true
+    await activate(f.api)
+    assert.match((await cacheStatus()).detail, /Temporary read failure/)
+    const live = await f.handlers.get('activity.snapshot')({ hideShortTasks: false })
+    assert.ok(live.agents.some((a) => a.sessionId === 's'))
+    assert.deepEqual(committed(), old)
+    failRead = false
+    f.rows = []
+    await f.handlers.get('refresh')()
+    assert.match((await cacheStatus()).detail, /exceeds 5 MiB/)
+    assert.deepEqual(committed(), old)
+    assert.equal(f.storage.has(key('b', 0)), false)
+    assert.equal(f.storage.get('unrelated:pressure').length, 32000)
+
+    f.storage.delete('unrelated:pressure')
+    await f.handlers.get('refresh')()
+    assert.equal((await cacheStatus()).status, 'ok')
+    assert.equal(f.storage.get(headKey).generation, 'b')
+    const restored = committed()
+    assert.deepEqual(
+      restored.agents.filter((a) => a.sessionId !== 's'),
+      old.agents
+    )
+    assert.deepEqual(
+      restored.points.filter((p) => oldStore.points.has(p.id)),
+      old.points
+    )
+    assert.ok(restored.agents.some((a) => a.sessionId === 's'))
+    assert.equal(f.storage.has(key('a', 0)), false)
+    assert.ok(peak > quota - 32000 && peak <= quota)
+    assert.equal(
+      f.storageReads.some((k) => k.startsWith('activity-v1:')),
+      false
+    )
+    for (const [k, v] of preferences) assert.deepEqual(f.storage.get(k), v)
+  } finally {
+    await deactivate()
+  }
+})
+
+for (const fault of [
+  'initial head',
+  'initial chunk',
+  'pre-save head',
+  'empty key lists',
+  'known store reads empty'
+]) {
+  test(`a storage fault (${fault}) followed by a rejected write preserves the committed generation`, async () => {
+    const f = workerFixture()
+    const now = Date.now()
+    const oldStore = new ActivityStore(now - 1000)
+    new PublicCollector(oldStore, {}, () => now).observe(
+      workspace,
+      {
+        ...row,
+        sessionId: 'prior-session'
+      },
+      now
+    )
+    const old = oldStore.serialize()
+    const headKey = `${STORAGE_PREFIX}:head`
+    const chunkKey = `${STORAGE_PREFIX}:a:0`
+    const head = { version: 2, generation: 'a', chunks: 1 }
+    const chunk = deflateSync(JSON.stringify(old)).toString('base64')
+    f.storage.set(headKey, head)
+    f.storage.set(chunkKey, chunk)
+    const storage = f.api.storage
+    let headReads = 0
+    let hideStorage = false
+    let lostRead = false
+    let rejectedWrite = false
+    f.api.storage = {
+      ...storage,
+      keys: async () => {
+        if (fault === 'known store reads empty' && headReads > 0 && !lostRead) {
+          hideStorage = true
+          lostRead = true
+        }
+        if (hideStorage) return []
+        if (fault === 'empty key lists' && !lostRead) {
+          lostRead = true
+          return []
+        }
+        return storage.keys()
+      },
+      get: async (key) => {
+        if (hideStorage) return null
+        if (key === headKey) headReads++
+        if (
+          !lostRead &&
+          ((fault === 'initial head' && key === headKey) ||
+            (fault === 'initial chunk' && key === chunkKey) ||
+            (fault === 'pre-save head' && key === headKey && headReads === 2))
+        ) {
+          lostRead = true
+          return null // The public get result for a temporarily unreadable Orca KV file.
+        }
+        return storage.get(key)
+      },
+      set: async (key, value) => {
+        assert.equal(
+          hideStorage,
+          false,
+          'an empty read of known storage must never trigger a write'
+        )
+        if (lostRead && !rejectedWrite) {
+          rejectedWrite = true
+          throw new Error('Staged write rejected')
+        }
+        return storage.set(key, value)
+      }
+    }
+    const assertCommitted = () => {
+      assert.deepEqual(f.storage.get(headKey), head)
+      assert.equal(f.storage.get(chunkKey), chunk)
+    }
+    try {
+      await activate(f.api)
+      const first = await f.handlers.get('activity.snapshot')({ hideShortTasks: false })
+      assert.equal(first.sources.find((s) => s.name === 'Recorder cache').status, 'error')
+      assert.ok(first.agents.some((a) => a.sessionId === 's'))
+      assert.ok(lostRead)
+      if (hideStorage) {
+        await f.handlers.get('refresh')()
+        assert.equal(rejectedWrite, false)
+        hideStorage = false
+      }
+      assertCommitted()
+      // This new observation is now available only in worker memory.
+      f.rows = []
+      f.sessions = []
+      await f.handlers.get('refresh')()
+      assert.ok(rejectedWrite)
+      assertCommitted()
+      await f.handlers.get('refresh')()
+      const next = f.storage.get(headKey)
+      assert.equal(next.generation, 'b')
+      const saved = JSON.parse(
+        inflateSync(Buffer.from(f.storage.get(`${STORAGE_PREFIX}:b:0`), 'base64'))
+      )
+      assert.deepEqual(
+        new Set(saved.agents.map((agent) => agent.sessionId)),
+        new Set(['prior-session', 's'])
+      )
+      assert.ok(saved.points.some((p) => p.id === old.points[0].id))
+    } finally {
+      await deactivate()
+    }
+  })
+}

@@ -32,7 +32,8 @@ session identity can show observed states, but cannot be resumed by this plugin.
 - Layout preferences use the plugin's own storage.
 
 Command-click on macOS or Ctrl-click elsewhere opens the selected session. The
-context menu offers the same **Open or resume terminal** action. Navigation first
+context menu offers the same **Open or resume terminal** action. Both controls
+explain which public identity is missing when the session cannot be opened. Navigation first
 rechecks workspace membership and current agent ownership through public APIs.
 It focuses an exact matching terminal; otherwise it verifies the original session
 in that workspace's public history and calls `agent.resume`, then `terminal.focus`.
@@ -93,9 +94,26 @@ alternating chunk generation and an atomic head update. It saves about every
 The encoded budget is 1.8 MiB; decompression is bounded to 32 MiB. Storage failures
 appear under Data sources. An over-budget save keeps the previous generation.
 
-0.1.x data under `activity-v1` stays untouched and is not read or imported. Old
-identities and routes came from a different collection source; importing them
-would mix private-file observations with public identities. Existing window and
+Before staging a generation the worker lists its own keys and deletes obsolete
+0.1.x recorder heads/chunks by name, plus public chunks outside the committed
+head. It never reads or imports private-source history. Two full encoded generations
+(1,843,200 bytes each) and their pretty-printed JSON keys/values together occupy
+under 3.53 MiB of the host's 5 MiB quota. If unrelated keys occupy the remaining
+space, the host can refuse the save. The next attempt uses the stored head to
+recover even when the previous worker stopped mid-write.
+
+Storage checks use only the public key list and head.
+After observing existing keys, the recorder defers writes if that storage disappears
+or the head and key list disagree. Live collection continues until the reads recover.
+On a new installation, two empty observations on separate refreshes start normal
+recording, usually after five seconds. Until then, observations are in memory.
+Orca 1.4.260 can report the same empty list
+and absent head for a persistent filesystem read error on cold start. Its public API
+provides no first-install or storage-health signal. If an error such as `ESTALE`
+persists through the first snapshot write, the host can replace the unreadable file.
+[Orca 1.4.260 KV implementation](https://github.com/stablyai/orca/blob/3330a89fa30edfd154901546f368ab4d6329962c/src/main/plugins/storage/plugin-storage-store.ts#L36-L97)
+
+Existing window and
 order preferences remain in the same plugin-owned storage. `dataDirectories` was
 removed and no longer selects any filesystem roots. Versions before 0.2.0, legacy
 screenshots and cover artwork describe the earlier implementation.

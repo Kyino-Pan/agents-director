@@ -98,7 +98,7 @@ test('context actions and platform click navigate the selected agent, preserving
   assert.equal(await page.locator('#sources-dialog').isVisible(), false)
   await page.locator(`.lane[data-agent="${snapshot.agents[1].id}"]`).click({ button: 'right' })
   assert.equal(
-    await page.getByRole('menuitem', { name: 'Open or resume terminal' }).isEnabled(),
+    await page.getByRole('menuitem', { name: /subagent has no public session ID/ }).isDisabled(),
     true
   )
   assert.deepEqual(errors, [])
@@ -650,39 +650,52 @@ test('only agents with evidence in the selected time window are visible', async 
   await page.close()
 })
 
-test('closed provider-only identity remains actionable and internal subagents explain why resume is unavailable', async () => {
+test('a closed subagent with only a provider-session alias points to its parent', async () => {
   const data = structuredClone(snapshot)
-  const agent = data.agents[0]
+  const agent = data.agents[1]
   agent.providerSessionId = 'closed-conversation'
-  agent.workspace = 'folder:original'
-  delete agent.sessionId
-  delete agent.terminalHandle
-  delete agent.paneKey
   const { page, errors } = await pageFor({ data })
   try {
     const lane = page.locator(`.lane[data-agent="${agent.id}"]`)
     await lane.click({ button: 'right' })
-    await page.getByRole('menuitem', { name: 'Open or resume terminal' }).click()
-    assert.deepEqual(await page.evaluate(() => window.navigationRequest), { agentId: agent.id })
-    await page.evaluate(() => {
-      const agent = window.testSnapshot.agents[0]
-      delete agent.providerSessionId
-      delete agent.workspace
-      agent.parentId = 'parent'
-      window.navigationRequest = null
-      window.notifyActivity()
-    })
-    await lane.click({ button: 'right' })
-    await page.getByRole('menuitem', { name: 'Open or resume terminal' }).click()
-    await page
-      .getByText(
-        'This internal subagent has no supported standalone resume identity. Open its parent conversation.',
-        { exact: true }
-      )
-      .waitFor()
-    assert.equal(await page.evaluate(() => window.navigationRequest), null)
+    const action = page.getByRole('menuitem', { name: /Open its parent conversation/ })
+    assert.equal(await action.isDisabled(), true)
+    assert.equal(await page.evaluate(() => window.navigationRequest), undefined)
     assert.deepEqual(errors, [])
   } finally {
     await page.close()
+  }
+})
+
+test('incomplete public identities disable the menu and explain modified clicks', async () => {
+  for (const [missing, reason] of [
+    ['workspace', /original workspace is unknown/],
+    ['provider', /provider is unknown/],
+    ['sessionId', /not provided a public session ID/]
+  ]) {
+    const data = structuredClone(snapshot)
+    const agent = data.agents[0]
+    delete agent[missing] // Keep the terminal handle, pane key and providerSessionId as decoys.
+    const { page, errors } = await pageFor({ data })
+    try {
+      const lane = page.locator(`.lane[data-agent="${agent.id}"]`)
+      await lane.click({ button: 'right' })
+      const action = page.getByRole('menuitem', { name: reason })
+      assert.equal(await action.isDisabled(), true)
+      await page.keyboard.press('Escape')
+      await lane.focus()
+      await page.keyboard.press('Shift+F10')
+      assert.equal(await action.isDisabled(), true)
+      await page.keyboard.press('Escape')
+      const modifier = await page.evaluate(() =>
+        navigator.userAgent.includes('Mac') ? 'Meta' : 'Control'
+      )
+      await lane.click({ modifiers: [modifier] })
+      assert.match(await page.locator('#navigation-status:visible').innerText(), reason)
+      assert.equal(await page.evaluate(() => window.navigationRequest), undefined)
+      assert.deepEqual(errors, [])
+    } finally {
+      await page.close()
+    }
   }
 })

@@ -4,7 +4,7 @@
   "execution": "trusted-worker",
   "id": "agent-activity",
   "name": "Agents Director",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A rolling seven-day timeline of publicly observed Orca agent states and session summaries.",
   "engines": {
     "orca": ">=1.4.260"

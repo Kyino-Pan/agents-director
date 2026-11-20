@@ -1,13 +1,19 @@
 import { ActivityStore } from './activity-store.mjs'
 import { PublicCollector } from './public-collector.mjs'
 import { createPublicNavigator } from './public-navigation.mjs'
-import { encodeRecorderCache, decodeRecorderCache } from './recorder-cache.mjs'
+import {
+  STORAGE_PREFIX,
+  encodeRecorderCache,
+  decodeRecorderCache,
+  readRecorderInventory,
+  reclaimUnusedChunks,
+  commitRecorderChunks
+} from './recorder-cache.mjs'
 
-// Separate public observations from the old private-file collector's identities and routes.
-export const STORAGE_PREFIX = 'activity-public-v1'
+export { STORAGE_PREFIX }
 let stop
 
-export default async function activate(orca) {
+export default function activate(orca) {
   const store = new ActivityStore()
   const collector = new PublicCollector(store, orca.host)
   const navigate = createPublicNavigator(store, orca.host)
@@ -15,11 +21,13 @@ export default async function activate(orca) {
   let timer
   let saving = Promise.resolve()
   let scanning = Promise.resolve()
-  let generation = null
-  let oldChunks = 0
   let lastSave = 0
   const pendingEvents = []
   let initialized = false
+  let cacheLoaded = false
+  let loadedHead = false
+  let sawEmptyStore = false
+  const knownKeys = new Set()
   const receive = (event) => {
     if (closing) return
     if (!initialized) {
@@ -35,6 +43,12 @@ export default async function activate(orca) {
     saving = saving
       .catch(() => {})
       .then(async () => {
+        const inventory = await readRecorderInventory(orca.storage, knownKeys)
+        if (inventory.head && !loadedHead) {
+          cacheLoaded = false
+          throw new Error('Public recorder history became available. Retrying restore.')
+        }
+        await reclaimUnusedChunks(orca.storage, inventory, knownKeys)
         let chunks
         try {
           chunks = encodeRecorderCache(store.serialize())
@@ -43,21 +57,8 @@ export default async function activate(orca) {
           store.source('Recorder cache', 'limited', error.message)
           return
         }
-        const next = generation === 'a' ? 'b' : 'a'
-        for (let index = 0; index < chunks.length; index++) {
-          await orca.storage.set(`${STORAGE_PREFIX}:${next}:${index}`, chunks[index])
-        }
-        await orca.storage.set(`${STORAGE_PREFIX}:head`, {
-          version: 2,
-          generation: next,
-          chunks: chunks.length
-        })
-        const previous = generation
-        generation = next
-        for (let index = 0; previous && index < oldChunks; index++) {
-          await orca.storage.delete(`${STORAGE_PREFIX}:${previous}:${index}`)
-        }
-        oldChunks = chunks.length
+        await commitRecorderChunks(orca.storage, inventory.head, chunks, knownKeys)
+        loadedHead = true
         lastSave = Date.now()
         store.source(
           'Recorder cache',
@@ -68,13 +69,57 @@ export default async function activate(orca) {
       .catch((error) => store.source('Recorder cache', 'error', error.message))
     return saving
   }
+  const restore = async () => {
+    const { head, keys } = await readRecorderInventory(orca.storage, knownKeys)
+    if (!keys.length && !sawEmptyStore) {
+      sawEmptyStore = true
+      store.source('Recorder cache', 'limited', 'Checking empty storage again on the next refresh.')
+      return false
+    }
+    if (!head) return true
+    const chunks = []
+    for (let index = 0; index < head.chunks; index++) {
+      const chunk = await orca.storage.get(`${STORAGE_PREFIX}:${head.generation}:${index}`)
+      if (typeof chunk !== 'string') {
+        throw new Error('Could not read a committed public recorder chunk.')
+      }
+      chunks.push(chunk)
+    }
+    const saved = decodeRecorderCache(head, chunks)
+    loadedHead = true
+    if (!initialized) {
+      store.restore(saved)
+      return true
+    }
+    // A previous host read failed. Keep observations collected while storage was offline.
+    const history = new ActivityStore()
+    history.restore(saved)
+    for (const field of ['agents', 'aliases', 'points', 'messages']) {
+      for (const [id, value] of history[field]) {
+        if (!store[field].has(id)) store[field].set(id, value)
+      }
+    }
+    store.collectingSince = Math.min(store.collectingSince, history.collectingSince)
+    return true
+  }
   const refresh = () => {
     scanning = scanning
       .catch(() => {})
       .then(async () => {
         if (closing) return
+        if (!cacheLoaded) {
+          try {
+            cacheLoaded = await restore()
+          } catch (error) {
+            store.source('Recorder cache', 'error', error.message)
+          }
+        }
         await collector.scan()
-        if (Date.now() - lastSave >= 15000) await persist()
+        if (!initialized) {
+          initialized = true
+          for (const event of pendingEvents.splice(0)) collector.receive(event)
+        }
+        if (cacheLoaded && Date.now() - lastSave >= 15000) await persist()
         orca.panels.post('activity.changed', { at: Date.now() })
       })
       .catch((error) => store.source('Collector', 'error', error.message))
@@ -100,32 +145,9 @@ export default async function activate(orca) {
     await refresh()
     return { refreshed: true }
   })
+  // Handlers await initialization without charging a large upgrade sweep to host activation.
   ready = (async () => {
-    try {
-      const head = await orca.storage.get(`${STORAGE_PREFIX}:head`)
-      if (
-        head?.version === 2 &&
-        ['a', 'b'].includes(head.generation) &&
-        Number.isInteger(head.chunks) &&
-        head.chunks > 0 &&
-        head.chunks <= 100
-      ) {
-        const chunks = []
-        for (let index = 0; index < head.chunks; index++) {
-          const chunk = await orca.storage.get(`${STORAGE_PREFIX}:${head.generation}:${index}`)
-          if (typeof chunk !== 'string') throw new Error('Public recorder cache is incomplete.')
-          chunks.push(chunk)
-        }
-        store.restore(decodeRecorderCache(head, chunks))
-        generation = head.generation
-        oldChunks = head.chunks
-      }
-    } catch (error) {
-      store.source('Recorder cache', 'error', error.message)
-    }
     await refresh()
-    initialized = true
-    for (const event of pendingEvents.splice(0)) collector.receive(event)
     const tick = async () => {
       await refresh()
       if (!closing) timer = setTimeout(tick, 5000)
@@ -139,9 +161,8 @@ export default async function activate(orca) {
     await ready
     clearTimeout(timer)
     await scanning
-    await persist()
+    if (cacheLoaded) await persist()
   }
-  await ready
 }
 
 export async function deactivate() {

@@ -1,12 +1,11 @@
+import { navigationUnavailableReason } from '../navigation-identity.mjs'
+
 export function createPublicNavigator(store, host) {
   const pending = new Map()
   const open = async (input) => {
     const agent = store.agents.get(input?.agentId)
-    if (!agent?.workspace || !agent.sessionId || !agent.provider) {
-      throw new Error(
-        'No public session identity and original workspace are available for this agent.'
-      )
-    }
+    const reason = navigationUnavailableReason(agent)
+    if (reason) throw new Error(reason)
     const { workspaces } = await host.call('workspace.list', {})
     if (!workspaces.some((row) => row.id === agent.workspace)) {
       throw new Error('The original workspace is no longer available in Orca.')

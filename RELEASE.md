@@ -1,4 +1,13 @@
-# v0.2.0 prepared change
+# v0.2.1 prepared change
+
+- Reclaim old recorder keys by name and discard uncommitted public chunks before
+  saving. A failed write preserves the last committed public snapshot, including
+  large v0.2.0 snapshots. View preferences survive the upgrade.
+- Enable terminal navigation when Orca supplies the original workspace, provider
+  and public session ID. The context menu and Command/Ctrl-click explain missing
+  identity. The worker verifies ownership again before focus or resume.
+
+## v0.2.0
 
 Address [review issue #11](https://github.com/Kyino-Pan/agents-director/issues/11)
 by replacing private Orca file/database access and internal runtime calls with the
