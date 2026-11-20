@@ -699,3 +699,95 @@ test('incomplete public identities disable the menu and explain modified clicks'
     }
   }
 })
+
+test('joined working track keeps the original waiting detail and receiver-only mail has no arrow', async () => {
+  const data = structuredClone(snapshot)
+  const now = data.now
+  const agent = data.agents[0]
+  agent.segments = [
+    { start: now - 90000, end: now - 60000, state: 'working' },
+    { start: now - 60000, end: now - 30001, state: 'waiting', source: 'live', joinedWork: true },
+    { start: now - 30001, end: now - 1000, state: 'working' }
+  ]
+  data.agents = [agent]
+  data.messages = [
+    {
+      id: 'public-mail:msg_123',
+      at: now - 45000,
+      deliveredAt: now - 45000,
+      from: null,
+      to: agent.id,
+      type: 'Mailbox input'
+    }
+  ]
+  const { page, errors } = await pageFor({
+    data,
+    preferences: new Map([['view:window-hours', 1 / 12]])
+  })
+  try {
+    const gap = page.locator('.segment-target[data-segment="1"]')
+    await gap.locator('.segment.working').waitFor()
+    assert.ok((await page.locator('.run-bar').evaluate((el) => el.getBBox().width)) > 100)
+    await gap.focus()
+    await page.keyboard.press('Enter')
+    assert.match(await page.locator('#detail-heading').textContent(), /waiting/i)
+    assert.match(await page.locator('#detail-body').textContent(), /live/)
+    await page.keyboard.press('Escape')
+    assert.equal(await page.locator('.mailbox-input').count(), 1)
+    assert.equal(await page.locator('.message-path').count(), 0)
+    await page.locator('.message-target').focus()
+    await page.keyboard.press('Enter')
+    assert.match(await page.locator('#detail-meta').textContent(), /Received by/)
+    assert.deepEqual(errors, [])
+  } finally {
+    await page.close()
+  }
+})
+
+test('message groups update their statuses and selection as transient attempts settle', async () => {
+  const { now } = snapshot
+  const [sender, receiver] = snapshot.agents
+  const base = { from: sender.id, to: receiver.id, at: now - 30000 }
+  const accepted = { ...base, id: 'public-mail:msg_first', type: 'Send accepted' }
+  const attempt = { ...base, id: 'public-attempt:old', type: 'Send attempted', at: base.at + 10 }
+  const received = {
+    ...attempt,
+    id: 'public-mail:msg_second',
+    type: 'Mailbox received',
+    deliveredAt: base.at + 20
+  }
+  let current = { ...snapshot, messages: [accepted, attempt] }
+  const { page, errors } = await pageFor({ data: current, getSnapshot: () => current })
+  try {
+    const group = page.locator('.message-target')
+    await group.press('Enter')
+    const related = page.locator('#related-messages button')
+    assert.equal(await related.count(), 2)
+    await related.last().click()
+    current = { ...current, messages: [accepted, received] }
+    await page.evaluate(() => window.notifyActivity())
+    await page.waitForFunction(() =>
+      document
+        .querySelector('.message-target')
+        .getAttribute('aria-label')
+        .includes('1 Mailbox received')
+    )
+    assert.equal(await group.getAttribute('data-status'), 'Mixed')
+    assert.match(await group.getAttribute('aria-label'), /1 Send accepted, 1 Mailbox received/)
+    assert.equal(
+      await group.locator('.message-path').evaluate((path) => getComputedStyle(path).strokeWidth),
+      '1.5px'
+    )
+    assert.equal(await page.locator('#detail-heading').textContent(), 'Send accepted')
+    await related.last().click()
+    assert.equal(await page.locator('#detail-heading').textContent(), 'Mailbox received')
+    current = { ...current, messages: [] }
+    await page.evaluate(() => window.notifyActivity())
+    await group.waitFor({ state: 'detached' })
+    assert.equal(await page.locator('#detail').isVisible(), false)
+    assert.equal(await page.locator('#failure').isVisible(), false)
+    assert.deepEqual(errors, [])
+  } finally {
+    await page.close()
+  }
+})

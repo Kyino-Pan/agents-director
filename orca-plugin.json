@@ -43,6 +43,7 @@
         "title": "Agents Director: Refresh activity"
       }
     ],
+    "hooks": [{ "event": "agent.tool.before" }, { "event": "agent.tool.after" }],
     "events": [
       {
         "on": "agent.status.changed"
@@ -78,17 +79,17 @@
   },
   "cover": {
     "path": "assets/cover.png",
-    "alt": "Synthetic illustration of the Agents Director timeline. Relationship arrows are illustrative and unavailable through the public plugin API."
+    "alt": "Synthetic illustration of the Agents Director timeline. Illustrative coordination arrows."
   },
   "screenshots": [
     {
       "path": "assets/light.png",
-      "alt": "Legacy synthetic timeline illustration; relationship arrows are unavailable through the public plugin API.",
+      "alt": "Legacy synthetic timeline illustration; illustrative coordination arrows.",
       "theme": "light"
     },
     {
       "path": "assets/dark.png",
-      "alt": "Legacy synthetic timeline illustration; relationship arrows are unavailable through the public plugin API.",
+      "alt": "Legacy synthetic timeline illustration; illustrative coordination arrows.",
       "theme": "dark"
     }
   ]

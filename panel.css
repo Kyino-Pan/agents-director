@@ -443,6 +443,7 @@ input::placeholder {
   stroke-width: 1;
   opacity: 0.35;
 }
+.run-bar,
 .segment {
   fill: var(--state);
   pointer-events: none;
@@ -487,11 +488,26 @@ input::placeholder {
   stroke-width: 1;
   opacity: 0.3;
 }
+/* A grouped arrow can contain both pending and confirmed receipts. */
+.message-target[data-status='Mixed'] .message-path {
+  stroke-width: 1.5;
+  opacity: 0.8;
+}
+.message-target[data-status='Send attempted'] .message-path {
+  stroke-dasharray: 1 4;
+}
+.message-target[data-status='Send accepted'] .message-path {
+  opacity: 0.65;
+}
+.message-target[data-status='Mailbox received'] .message-path {
+  opacity: 0.9;
+}
 .message-hit {
   fill: none;
   stroke: transparent;
   stroke-width: 14;
 }
+.mailbox-input,
 .message-dot {
   fill: var(--orca-background);
   stroke: var(--orca-foreground);

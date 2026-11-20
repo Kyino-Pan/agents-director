@@ -1,3 +1,4 @@
+import { RouteEvidence } from './route-evidence.mjs'
 import { WINDOW_MS } from './activity-store.mjs'
 
 const STATES = new Set(['working', 'blocked', 'waiting', 'done'])
@@ -13,6 +14,7 @@ export class PublicCollector {
   workspaces = new Map()
   live = new Map()
   revisions = new Map()
+  identities = new Map()
   historyAt = -Infinity
   sequence = 0
 
@@ -20,11 +22,12 @@ export class PublicCollector {
     this.store = store
     this.host = host
     this.now = now
+    this.relations = new RouteEvidence(store, (terminal) => this.owner(terminal), now)
     this.boot = `${now()}:${Math.random().toString(36).slice(2)}`
     store.source(
       'Coverage',
       'limited',
-      'Public API: session summaries and observed terminal states only. Conversation text, orchestration relationships and process memory are unavailable. Offline time stays unknown.'
+      'Public session summaries, terminal states and verified local tool receipts. Messages without observable endpoints and past coordination are unavailable.'
     )
   }
 
@@ -56,6 +59,24 @@ export class PublicCollector {
     })
   }
 
+  owner(terminal) {
+    let owner
+    for (const row of this.live.values()) {
+      if (row.owner?.terminal !== terminal || this.now() - row.at > MAX_GAP_MS) continue
+      if (owner) return
+      owner = row.owner
+    }
+    return owner
+  }
+
+  identity(route, session, at) {
+    const prior = this.identities.get(route)
+    if (prior?.session === session) return prior
+    const identity = { session, since: at, first: !prior }
+    this.identities.set(route, identity)
+    return identity
+  }
+
   observe(workspace, row, at) {
     if (!STATES.has(row.state)) return
     const id = this.identify(workspace, row)
@@ -64,10 +85,28 @@ export class PublicCollector {
     const stateStartedAt = Number.isFinite(row.stateStartedAt) ? row.stateStartedAt : null
     const previous = this.live.get(route)
     if (previous && at < previous.at) return
+    const session = text(row.sessionId)
+    const identity = session && this.identity(route, session, at)
+    const owner =
+      identity &&
+      row.agent &&
+      (previous?.owner?.identity === identity &&
+      previous.agentId === id &&
+      at - previous.at <= MAX_GAP_MS
+        ? previous.owner
+        : {
+            identity,
+            id,
+            terminal: row.terminalId,
+            provider: row.agent,
+            first: identity.first,
+            since: identity.since
+          })
     const point = previous && this.store.points.get(previous.key)
     if (
       point &&
       previous.agentId === id &&
+      previous.owner === owner &&
       previous.state === row.state &&
       previous.stateStartedAt === stateStartedAt &&
       at - previous.at <= MAX_GAP_MS
@@ -82,6 +121,7 @@ export class PublicCollector {
     this.live.set(route, {
       key,
       agentId: id,
+      owner,
       provider: text(row.agent),
       state: row.state,
       stateStartedAt,
@@ -96,6 +136,7 @@ export class PublicCollector {
     const route = address(workspace.id, event.terminalId)
     this.revisions.set(route, (this.revisions.get(route) || 0) + 1)
     const session = text(event.sessionId)
+    if (session) this.identity(route, session, this.now())
     const candidates = [...this.store.agents.values()].filter(
       (agent) => agent.workspace === workspace.id && session && agent.sessionId === session
     )
@@ -175,8 +216,15 @@ export class PublicCollector {
           if (!Array.isArray(result.agents)) throw new Error('Invalid agent list')
           const at = this.now()
           const present = new Set()
+          const unique = new Set()
+          const ambiguous = new Set()
+          for (const { terminalId } of result.agents) {
+            if (unique.has(terminalId)) ambiguous.add(terminalId)
+            unique.add(terminalId)
+          }
           for (const row of result.agents) {
             const route = address(workspace.id, row.terminalId)
+            if (ambiguous.has(row.terminalId)) continue
             present.add(route)
             if ((this.revisions.get(route) || 0) === (revisions.get(route) || 0)) {
               this.observe(workspace, row, at)
@@ -205,6 +253,11 @@ export class PublicCollector {
     }
     await Promise.all(Array.from({ length: Math.min(rows.length, 4) }, scanWorkspace))
     if (this.now() - this.historyAt >= HISTORY_INTERVAL_MS) await this.history()
+    this.relations.refresh()
+    for (const [route, identity] of this.identities) {
+      if (!this.live.has(route) && this.now() - identity.since > 120000)
+        this.identities.delete(route)
+    }
     store.collectedUntil = this.now()
     store.prune(this.now())
   }

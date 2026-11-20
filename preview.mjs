@@ -100,7 +100,7 @@ export async function startPreview({ port = 0 } = {}) {
                 name: 'Synthetic preview',
                 status: 'limited',
                 detail:
-                  'Illustration only. Relationship arrows and conversation text are unavailable through the public plugin API.'
+                  'Illustration only. Live coordination coverage depends on observable public tool receipts.'
               }
             ]
           })

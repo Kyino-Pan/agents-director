@@ -126,12 +126,14 @@ export function renderActivityDetail(context) {
     const name = (id) => agentName(displayed.agents.find((agent) => agent.id === id))
     $('detail-heading').textContent = message.subject || message.type || 'Coordination message'
     $('detail-meta').textContent =
-      `${name(message.from)} → ${name(message.to)} · ${message.type} · ${dateFormat.format(message.at)}${message.deliveredAt ? ` · Delivered ${timeFormat.format(message.deliveredAt)}` : ' · Delivery not confirmed'}`
-    $('detail-body').textContent = message.body || 'No message body.'
-    const related = selection.messages || []
+      `${message.from === null ? 'Received by ' : name(message.from) + ' → '}${name(message.to)} · ${message.type} · ${dateFormat.format(message.at)}${message.deliveredAt ? ` · Delivered ${timeFormat.format(message.deliveredAt)}` : ' · Delivery not confirmed'}`
+    $('detail-body').textContent =
+      message.body ||
+      (message.id.startsWith('public-') ? 'Only routing metadata is recorded.' : 'No message body.')
+    const relatedIds = new Set(selection.messages)
+    const related = displayed.messages.filter((item) => relatedIds.has(item.id))
     $('related-messages').replaceChildren(
-      ...related.map((id) => {
-        const item = displayed.messages.find((entry) => entry.id === id)
+      ...related.map((item) => {
         const button = node(
           'button',
           '',
@@ -139,7 +141,7 @@ export function renderActivityDetail(context) {
         )
         button.type = 'button'
         button.addEventListener('click', () => {
-          selection.message = id
+          selection.message = item.id
           renderActivityDetail(context)
         })
         return button
@@ -147,9 +149,9 @@ export function renderActivityDetail(context) {
     )
     $('related-messages').hidden = related.length < 2
     renderIdentity(
-      [...new Set([message.from, message.to])].map(
-        (id) => displayed.agents.find((agent) => agent.id === id) || { id }
-      ),
+      [...new Set([message.from, message.to])]
+        .filter(Boolean)
+        .map((id) => displayed.agents.find((agent) => agent.id === id) || { id }),
       node,
       displayed
     )
@@ -180,6 +182,9 @@ export function renderActivityDetail(context) {
     if (state === 'unknown') {
       $('detail-body').textContent = unobservedDescription(agent, segment)
     }
+    if (segment.joinedWork)
+      $('detail-body').textContent +=
+        ' The timeline connects the working observations on either side of this short interval.'
   }
 }
 
@@ -190,6 +195,12 @@ export function activeAgents(snapshot, start, end) {
     )
   )
   const query = $('search').value.trim().toLocaleLowerCase()
+  for (const agent of snapshot.agents) {
+    if (agent.parentId && agent.spawnedAt >= start && agent.spawnedAt <= end) {
+      participants.add(agent.id)
+      participants.add(agent.parentId)
+    }
+  }
   return snapshot.agents.filter(
     (agent) =>
       (participants.has(agent.id) ||
@@ -197,7 +208,7 @@ export function activeAgents(snapshot, start, end) {
         agent.segments.some((segment) =>
           segment.state === 'done'
             ? segment.start >= start && segment.start <= end
-            : ['working', 'blocked', 'waiting'].includes(segment.state) &&
+            : (segment.joinedWork || ['working', 'blocked', 'waiting'].includes(segment.state)) &&
               segment.end > start &&
               segment.start < end
         )) &&

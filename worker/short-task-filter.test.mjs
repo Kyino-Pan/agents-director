@@ -129,3 +129,49 @@ test('classification ignores viewport options and retained incomplete history ca
   restored.restore(store.serialize(), NOW)
   assert.deepEqual(ids(filtered(restored)), ['trimmed'])
 })
+
+test('chains two-sided work gaps strictly below 30 seconds without changing raw observations', () => {
+  for (const gap of [29999, 30000, 30001]) {
+    const store = new ActivityStore(START)
+    let at = START
+    for (let i = 0; i < 3; i++) {
+      store.point('w' + i, 'session', at, 'working', 'live', at + 1000)
+      at += 1000
+      if (i < 2) {
+        store.point('pause' + i, 'session', at, 'waiting', 'live', at + 30)
+        at += gap
+      }
+    }
+    store.point('done', 'session', at, 'done', 'live', at + 50)
+    store.point('new-run', 'session', at + 1000, 'working', 'live', at + 2000)
+    store.point('other', 'other-session', at + 50, 'working', 'live', at + 90)
+    const raw = store.serialize()
+    const restored = new ActivityStore()
+    restored.restore(raw, NOW)
+    for (const recorder of [store, restored]) {
+      const snapshot = recorder.snapshot(NOW)
+      const intervals = snapshot.agents.find((a) => a.id === 'session').segments
+      const bridges = intervals.filter((s) => s.joinedWork)
+      assert.equal(bridges.length, gap < 30000 ? 4 : 0)
+      assert.ok(bridges.every((s) => s.end <= at && ['unknown', 'waiting'].includes(s.state)))
+      assert.ok(
+        !snapshot.agents.find((a) => a.id === 'other-session').segments.some((s) => s.joinedWork)
+      )
+      assert.deepEqual(recorder.serialize().points, raw.points)
+    }
+  }
+})
+test('default short-task filter counts connected display time before hiding a completed lane', () => {
+  const store = new ActivityStore(START)
+  let t = START
+  for (let i = 0; i < 4; i++) {
+    store.point('w' + i, 'lane', t, 'working', 'live', t + 30000)
+    t += 30000
+    if (i < 3) {
+      store.point('switch' + i, 'lane', t, 'blocked', 'live', t + 20000)
+      t += 20000
+    }
+  }
+  store.point('finished', 'lane', t, 'done', 'live', t + 5000)
+  assert.deepEqual(ids(filtered(store)), ['lane'])
+})
