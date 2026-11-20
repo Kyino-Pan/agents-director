@@ -1,3 +1,5 @@
+import { navigationUnavailableReason } from './navigation-identity.mjs'
+
 export function installActivityActions(getSnapshot) {
   const menu = document.getElementById('activity-menu')
   const navigate = document.getElementById('navigate-terminal')
@@ -7,9 +9,6 @@ export function installActivityActions(getSnapshot) {
   let selectedAgent
   let pending = false
   let returnFocus
-  const hasAddress = (agent) =>
-    agent?.terminalHandle ||
-    ((agent?.paneKey || agent?.sessionId || agent?.providerSessionId) && agent?.workspace)
   const agentAt = (target) => {
     const id = target.closest('[data-agent]')?.dataset.agent
     return getSnapshot()?.agents.find((agent) => agent.id === id)
@@ -22,13 +21,8 @@ export function installActivityActions(getSnapshot) {
     feedback.hidden = false
     feedback.textContent = 'Opening agent…'
     try {
-      if (!hasAddress(agent)) {
-        throw new Error(
-          agent?.parentId
-            ? 'This internal subagent has no supported standalone resume identity. Open its parent conversation.'
-            : 'No conversation identity and original workspace were recorded for this agent.'
-        )
-      }
+      const reason = navigationUnavailableReason(agent)
+      if (reason) throw new Error(reason)
       const result = await window.orca.plugin.request('activity.navigate', { agentId: agent.id })
       if (!result?.navigated) {
         throw new Error('The agent could not be opened.')
@@ -44,8 +38,9 @@ export function installActivityActions(getSnapshot) {
     selectedAgent = agentAt(target)
     returnFocus = target.closest('[data-agent]') || document.activeElement
     navigate.hidden = !selectedAgent
-    navigate.textContent = 'Open or resume terminal'
-    navigate.disabled = pending
+    const reason = navigationUnavailableReason(selectedAgent)
+    navigate.textContent = reason || 'Open or resume terminal'
+    navigate.disabled = pending || Boolean(reason)
     menu.showPopover()
     menu.style.left = `${Math.max(4, Math.min(x, innerWidth - menu.offsetWidth - 4))}px`
     menu.style.top = `${Math.max(4, Math.min(y, innerHeight - menu.offsetHeight - 4))}px`

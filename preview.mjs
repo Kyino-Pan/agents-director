@@ -18,6 +18,7 @@ export async function startPreview({ port = 0 } = {}) {
       'assets/orca-harness-icons.mjs',
       'text/javascript; charset=utf-8'
     ],
+    'navigation-identity.mjs': ['navigation-identity.mjs', 'text/javascript'],
     'panel-actions.mjs': ['panel-actions.mjs', 'text/javascript; charset=utf-8'],
     'lane-order.mjs': ['lane-order.mjs', 'text/javascript'],
     'lane-motion.mjs': ['lane-motion.mjs', 'text/javascript'],
