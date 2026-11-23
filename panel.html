@@ -69,7 +69,24 @@
           ><span><i class="swatch blocked"></i>Blocked</span
           ><span><i class="swatch waiting"></i>Waiting</span
           ><span><i class="swatch done"></i>Done</span
-          ><span><i class="swatch unknown"></i>Unobserved</span>
+          ><span>
+            <svg width="16" height="6" class="unknown" aria-hidden="true">
+              <defs>
+                <!-- At 45°, each vertical slice of a 6px track crosses a stripe. -->
+                <pattern
+                  id="unobserved-hatch"
+                  patternUnits="userSpaceOnUse"
+                  width="4"
+                  height="12"
+                  patternTransform="rotate(45)"
+                >
+                  <rect width="1.5" height="12" fill="var(--orca-muted-foreground)" />
+                </pattern>
+              </defs>
+              <rect width="16" height="6" />
+            </svg>
+            Unobserved</span
+          >
           <span class="connector-legend">└ Spawn</span
           ><span class="connector-legend">↗ Message</span>
         </div>

@@ -4,7 +4,6 @@
   --activity-blocked: color-mix(in srgb, var(--orca-destructive) 70%, var(--orca-background));
   --activity-waiting: color-mix(in srgb, var(--orca-foreground) 28%, var(--orca-background));
   --activity-done: color-mix(in srgb, var(--orca-foreground) 16%, var(--orca-background));
-  --activity-unknown: var(--orca-border);
   --font-mono: 'Geist Mono', monospace;
   --control-radius: calc(var(--orca-radius, 0.5rem) - 2px);
 }
@@ -276,9 +275,6 @@ input::placeholder {
 .done {
   --state: var(--activity-done);
 }
-.unknown {
-  --state: var(--activity-unknown);
-}
 .connector-legend {
   margin-left: 4px;
 }
@@ -447,8 +443,9 @@ input::placeholder {
   fill: var(--state);
   pointer-events: none;
 }
-.segment.unknown {
-  fill: var(--orca-border);
+.segment.unknown,
+.legend .unknown {
+  fill: url(#unobserved-hatch);
 }
 .segment-hit {
   fill: transparent;

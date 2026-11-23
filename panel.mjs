@@ -458,10 +458,10 @@ function render() {
         }),
         svg('rect', {
           x: left,
-          y: center(agent.id) - (paint === 'unknown' ? 1 : 3),
+          y: center(agent.id) - 3,
           width: barWidth,
-          height: paint === 'unknown' ? 2 : 6,
-          rx: 1,
+          height: 6,
+          rx: paint === 'unknown' ? 0 : 1,
           class: `segment ${paint}${segment.end >= end ? ' current' : ''}`
         })
       )

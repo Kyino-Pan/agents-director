@@ -380,34 +380,48 @@ test('old payloads and duplicate names retain separate stable identities across 
 test('thin history tracks keep accessible states and generous targets in both host themes', async () => {
   const data = structuredClone(snapshot)
   const ago = (hours) => data.now - hours * 3_600_000
+  const interval = (from, to, state) => ({
+    start: ago(from),
+    end: ago(to),
+    state,
+    source: 'fixture'
+  })
   data.agents = [
     {
       id: 'states',
-      label: 'Observed states',
+      label: 'Coordinator',
+      provider: 'Codex',
       projectId: 'p',
-      projectName: 'Project',
-      segments: ['working', 'blocked', 'waiting', 'done', 'working', 'unknown'].map(
-        (state, index) => ({
-          start: ago(12 - index * 2),
-          end: ago(10 - index * 2),
-          state,
-          source: 'fixture'
-        })
-      )
+      projectName: 'Orca',
+      segments: [
+        interval(23, 19, 'working'),
+        interval(19, 17, 'blocked'),
+        interval(17, 15, 'waiting'),
+        interval(15, 10, 'done'),
+        interval(10, 5, 'unknown'),
+        interval(5, 4.5, 'done'),
+        interval(4.5, 4, 'unknown'),
+        interval(4, 3, 'done'),
+        interval(3, 2.975, 'unknown'),
+        interval(2.975, 0, 'working')
+      ]
     },
     {
       id: 'run',
-      label: 'Joined run',
+      label: 'Activity collector',
+      provider: 'Claude',
       projectId: 'p',
-      projectName: 'Project',
+      projectName: 'Orca',
       segments: [
-        { start: ago(2), end: ago(1), state: 'working' },
-        { start: ago(1), end: ago(1) + 1000, state: 'waiting', joinedWork: true },
+        { start: ago(18), end: ago(1), state: 'working' },
+        { start: ago(1), end: ago(1) + 1000, state: 'unknown', joinedWork: true },
         { start: ago(1) + 1000, end: data.now, state: 'working' }
       ]
     }
   ]
-  data.messages = []
+  data.messages = [
+    { ...data.messages[0], from: 'states', to: 'run', at: ago(13), deliveredAt: ago(13) }
+  ]
   for (const width of [1100, 320]) {
     for (const dark of [false, true]) {
       const { page, errors } = await pageFor({ width, height: 820, dark, data })
@@ -417,7 +431,38 @@ test('thin history tracks keep accessible states and generous targets in both ho
           await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
           dark ? 'dark' : 'light'
         )
-        assert.equal(await page.locator('#chart text, #chart pattern').count(), 0)
+        assert.equal(await page.locator('#chart text').count(), 0)
+        assert.equal(await page.locator('pattern#unobserved-hatch').count(), 1)
+        const hatchFill = await page
+          .locator('.legend svg.unknown > rect')
+          .evaluate((el) => getComputedStyle(el).fill)
+        assert.match(hatchFill, /#unobserved-hatch/)
+        assert.deepEqual(
+          await page
+            .locator('.segment.unknown')
+            .evaluateAll((bars) => bars.map((bar) => getComputedStyle(bar).fill)),
+          [hatchFill, hatchFill, hatchFill]
+        )
+        const narrow = page.locator('.segment.unknown').last()
+        const narrowWidth = Number(await narrow.getAttribute('width'))
+        assert.ok(narrowWidth > 0 && narrowWidth < 1)
+        assert.equal(await narrow.locator('..').locator('.segment-hit').getAttribute('width'), '8')
+        if (width === 1100 && process.env.ACTIVITY_SCREENSHOTS) {
+          const top = Math.floor((await page.locator('.legend').boundingBox()).y)
+          const lanes = await page.locator('#lanes').boundingBox()
+          await mkdir(process.env.ACTIVITY_SCREENSHOTS, { recursive: true })
+          await page.screenshot({
+            path: `${process.env.ACTIVITY_SCREENSHOTS}/unobserved-${dark ? 'dark' : 'light'}.png`,
+            clip: { x: 0, y: top, width, height: Math.ceil(lanes.y + lanes.height) - top + 8 }
+          })
+        }
+        await narrow.locator('..').press('Enter')
+        assert.match(
+          await page.locator('#detail-heading').textContent(),
+          /Coordinator · Unobserved/
+        )
+        assert.match(await page.locator('#detail-meta').textContent(), /1 min$/)
+        await page.keyboard.press('Escape')
         const bamboo = dark ? 'rgb(163, 199, 128)' : 'rgb(87, 124, 55)'
         assert.equal(
           await page
@@ -480,7 +525,7 @@ test('thin history tracks keep accessible states and generous targets in both ho
             )
             assert.match(
               await page.locator('#detail-body').textContent(),
-              /Last observed: Working through/
+              /Last observed: Done through/
             )
           }
           await page.keyboard.press('Escape')
