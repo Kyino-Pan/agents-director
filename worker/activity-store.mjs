@@ -1,3 +1,5 @@
+import { segmentAt } from '../timeline-evidence.mjs'
+
 export const WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 const STATES = new Set(['working', 'blocked', 'waiting', 'done', 'unknown'])
 const MAX_RECORDS = 5000
@@ -104,6 +106,80 @@ function isFinishedShortTask(agent, points) {
     }
   }
   return executionMs > 0 && executionMs < SHORT_TASK_MS
+}
+
+// A displayed message can reserve at most three intervals: both lanes at the
+// plotted time and the receiver at retrieval. Even 600 messages fit in 4,000.
+function limitTimeline(agents, messages) {
+  let budget = 4000
+  if (agents.reduce((sum, a) => sum + a.segments.length, 0) <= budget) return false
+  const lanes = new Map(
+    agents.map((agent) => [agent.id, { agent, keep: new Set(), next: agent.segments.length - 1 }])
+  )
+  function reserve(id, at) {
+    const lane = lanes.get(id)
+    if (!lane || !Number.isFinite(at)) return
+    const segment = segmentAt(lane.agent.segments, at)
+    if (segment) lane.keep.add(segment)
+  }
+  for (const message of messages) {
+    reserve(message.from, message.at)
+    reserve(message.to, message.at)
+    reserve(message.to, message.deliveredAt)
+  }
+  // Keep the latest interval on every lane. Then fill equal-sized shares
+  // newest first, letting sparse lanes and reservations sit out each round.
+  for (const { agent, keep } of lanes.values()) {
+    if (agent.segments.length) keep.add(agent.segments.at(-1))
+    budget -= keep.size
+  }
+  let active = [...lanes.values()].reverse()
+  for (let share = 1; budget > 0; share++) {
+    active = active.filter(({ agent, keep }) => keep.size < agent.segments.length)
+    for (const lane of active) {
+      const { agent, keep } = lane
+      if (keep.size >= share) continue
+      while (keep.has(agent.segments[lane.next])) lane.next--
+      keep.add(agent.segments[lane.next--])
+      if (--budget === 0) break
+    }
+  }
+  for (const { agent, keep } of lanes.values()) {
+    const segments = agent.segments
+    if (segments.length === keep.size) continue
+    // Report the exact holes, and keep a short-gap display join only when
+    // its bounding working observations and the whole bridge survived.
+    agent.omittedSegments = segments.length - keep.size
+    agent.omittedRanges = []
+    agent.segments = []
+    let lastWork = -1
+    let hole
+    for (const segment of segments) {
+      if (!keep.has(segment)) {
+        if (hole && hole.end === segment.start) hole.end = segment.end
+        else {
+          hole = { start: segment.start, end: segment.end }
+          agent.omittedRanges.push(hole)
+        }
+        lastWork = -1
+        continue
+      }
+      hole = null
+      if (segment.state === 'working') {
+        if (lastWork >= 0) {
+          for (let i = lastWork + 1; i < agent.segments.length; i++)
+            agent.segments[i].joinedWork = true
+        }
+        lastWork = agent.segments.length
+      } else if (segment.joinedWork) {
+        delete segment.joinedWork
+      } else {
+        lastWork = -1
+      }
+      agent.segments.push(segment)
+    }
+  }
+  return true
 }
 
 export function timestamp(value) {
@@ -488,25 +564,7 @@ export class ActivityStore {
       })
       .filter(Boolean)
       .sort((a, b) => a.label.localeCompare(b.label))
-    let limited = this.limited || agents.length > 160
-    let budget = 4000
     const visible = agents.slice(0, 160)
-    // Satisfy small lanes first and divide the remaining space among dense ones.
-    // This allocation order does not change the lane order returned to the panel.
-    const bySize = [...visible].sort((a, b) => a.segments.length - b.segments.length)
-    for (const [index, agent] of bySize.entries()) {
-      const count = Math.min(agent.segments.length, Math.floor(budget / (bySize.length - index)))
-      budget -= count
-      if (count < agent.segments.length) {
-        limited = true
-        agent.omittedSegments = agent.segments.length - count
-        agent.omittedRange = {
-          start: agent.segments[0].start,
-          end: agent.segments[agent.omittedSegments - 1].end
-        }
-        agent.segments = agent.segments.slice(agent.omittedSegments)
-      }
-    }
     const ids = new Set(visible.map((agent) => agent.id))
     const messages = [...this.messages.values(), ...attempts]
       .filter(
@@ -516,15 +574,18 @@ export class ActivityStore {
           ids.has(message.to)
       )
       .sort((a, b) => a.at - b.at)
+    const shown = messages.slice(-600)
+    const trimmed = limitTimeline(visible, shown)
     return {
       now,
       windowStart,
       agents: visible,
-      messages: messages.slice(-600),
+      messages: shown,
       sources: [...this.sources.values()].slice(0, 200),
       collectingSince: this.collectingSince,
       hiddenShortTasks,
-      limited: limited || messages.length > 600
+      limited:
+        this.limited || trimmed || agents.length > visible.length || messages.length > shown.length
     }
   }
 

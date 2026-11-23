@@ -76,6 +76,8 @@ export function createLaneMotion(lanes, chart) {
           animate(line, [{ d: `path("${before}")` }, { d: `path("${after}")` }])
         }
         const dot = element.querySelector('.message-dot')
+        const recipient = element.querySelector('.unobserved-endpoint.recipient')
+        if (recipient) move(recipient, toDelta)
         const count = element.querySelector('.message-count')
         if (dot) {
           move(dot, fromDelta)

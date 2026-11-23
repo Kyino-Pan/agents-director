@@ -1,11 +1,9 @@
 :root {
   color-scheme: light dark;
-  --activity-working: color-mix(in srgb, var(--orca-foreground) 55%, var(--orca-background));
-  --activity-active: var(--orca-foreground);
+  --activity-working: light-dark(#577c37, #a3c780);
   --activity-blocked: color-mix(in srgb, var(--orca-destructive) 70%, var(--orca-background));
   --activity-waiting: color-mix(in srgb, var(--orca-foreground) 28%, var(--orca-background));
   --activity-done: color-mix(in srgb, var(--orca-foreground) 16%, var(--orca-background));
-  --activity-unknown: var(--orca-border);
   --font-mono: 'Geist Mono', monospace;
   --control-radius: calc(var(--orca-radius, 0.5rem) - 2px);
 }
@@ -277,9 +275,6 @@ input::placeholder {
 .done {
   --state: var(--activity-done);
 }
-.unknown {
-  --state: var(--activity-unknown);
-}
 .connector-legend {
   margin-left: 4px;
 }
@@ -448,11 +443,9 @@ input::placeholder {
   fill: var(--state);
   pointer-events: none;
 }
-.segment.unknown {
-  fill: var(--orca-border);
-}
-.segment.current.working {
-  fill: var(--activity-active);
+.segment.unknown,
+.legend .unknown {
+  fill: url(#unobserved-hatch);
 }
 .segment-hit {
   fill: transparent;
@@ -514,12 +507,17 @@ input::placeholder {
   stroke-width: 1;
   opacity: 0.5;
 }
+.unobserved-endpoint {
+  fill: var(--orca-background);
+  stroke: var(--orca-foreground);
+  opacity: 1;
+}
 .message-target:hover .message-path,
 .message-target[data-selected='true'] .message-path {
   opacity: 1;
   stroke-width: 1.5;
 }
-.message-target[data-selected='true'] .message-dot {
+.message-target[data-selected='true'] .message-dot:not(.unobserved-endpoint) {
   fill: var(--orca-foreground);
 }
 .empty {

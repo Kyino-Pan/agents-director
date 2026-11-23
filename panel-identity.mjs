@@ -1,3 +1,4 @@
+import { segmentAt } from './timeline-evidence.mjs'
 import { orderProjectLanes } from './lane-order.mjs'
 import { harnessLabel } from './panel-harness.mjs'
 
@@ -102,8 +103,7 @@ export function renderActivityDetail(context) {
     selection,
     displayed,
     node,
-    timeFormat,
-    dateFormat,
+    eventTime,
     stateOf,
     stateLabel,
     laneEvidence,
@@ -124,13 +124,37 @@ export function renderActivityDetail(context) {
       $('detail').hidden = true
       return
     }
-    const name = (id) => agentName(displayed.agents.find((agent) => agent.id === id))
+    const lane = (id) => displayed.agents.find((agent) => agent.id === id)
+    let missingState = false
+    const endpoint = (id, at) => {
+      const state = stateOf(segmentAt(lane(id)?.segments ?? [], at))
+      if (state !== 'unknown') return stateLabel(state)
+      missingState = true
+      return 'No observed state'
+    }
+    const input = message.from === null
+    const received = Number.isFinite(message.deliveredAt)
+    const recipient = agentName(lane(message.to))
+    const route = input
+      ? 'Received by ' + recipient
+      : agentName(lane(message.from)) + ' → ' + recipient
     $('detail-heading').textContent = message.subject || message.type || 'Coordination message'
-    $('detail-meta').textContent =
-      `${message.from === null ? 'Received by ' : name(message.from) + ' → '}${name(message.to)} · ${message.type} · ${dateFormat.format(message.at)}${message.deliveredAt ? ` · Delivered ${timeFormat.format(message.deliveredAt)}` : ' · Delivery not confirmed'}`
-    $('detail-body').textContent =
+    $('detail-meta').textContent = `${route} · ${message.type}`
+    const states = input
+      ? [
+          `At retrieval (${eventTime.format(message.at)}) · Receiver: ${endpoint(message.to, message.at)}`
+        ]
+      : [
+          `At send (${eventTime.format(message.at)}) · Sender: ${endpoint(message.from, message.at)} · Receiver: ${endpoint(message.to, message.at)}`,
+          received
+            ? `At retrieval (${eventTime.format(message.deliveredAt)}) · Receiver: ${endpoint(message.to, message.deliveredAt)}`
+            : 'Delivery not confirmed'
+        ]
+    if (missingState) states.push('Execution state requires a separate recorder observation.')
+    const body =
       message.body ||
       (message.id.startsWith('public-') ? 'Only routing metadata is recorded.' : 'No message body.')
+    $('detail-body').textContent = [...states, body].join('\n')
     const relatedIds = new Set(selection.messages)
     const related = displayed.messages.filter((item) => relatedIds.has(item.id))
     $('related-messages').replaceChildren(
@@ -138,7 +162,7 @@ export function renderActivityDetail(context) {
         const button = node(
           'button',
           '',
-          `${timeFormat.format(item.at)} · ${item.subject || item.type}`
+          `${eventTime.format(item.at)} · ${item.subject || item.type}`
         )
         button.type = 'button'
         button.addEventListener('click', () => {
@@ -175,7 +199,7 @@ export function renderActivityDetail(context) {
     const state = stateOf(segment)
     $('detail-heading').textContent = `${agentName(agent)} · ${stateLabel(state)}`
     $('detail-meta').textContent =
-      `${dateFormat.format(segment.start)} – ${dateFormat.format(segment.end)} · ${duration(segment.end - segment.start)}`
+      `${eventTime.format(segment.start)} – ${eventTime.format(segment.end)} · ${duration(segment.end - segment.start)}`
     $('detail-body').textContent = `Observed via ${segment.source || 'an unknown source'}.`
     if (state === 'unknown') {
       $('detail-body').textContent = unobservedDescription(agent, segment)
@@ -187,8 +211,7 @@ export function renderActivityDetail(context) {
 }
 
 export function overlapsOmittedRange(agent, start, end) {
-  const range = agent.omittedRange
-  return range && range.start < end && range.end > start
+  return agent.omittedRanges?.some((range) => range.start < end && range.end > start)
 }
 
 export function activeAgents(snapshot, start, end) {
