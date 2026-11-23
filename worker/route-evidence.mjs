@@ -84,10 +84,40 @@ export function actionOf(event) {
   }
 }
 
+function readyWorker(receipt) {
+  if (
+    receipt.state === 'ready' &&
+    (receipt.mode === undefined || receipt.mode === 'terminal') &&
+    typeof receipt.terminal === 'string' &&
+    term.test(receipt.terminal) &&
+    typeof receipt.dispatchId === 'string' &&
+    dispatch.test(receipt.dispatchId)
+  )
+    return { terminal: receipt.terminal, dispatch: 'dispatch:' + receipt.dispatchId }
+}
+
+function plainWorkerReceipt(output) {
+  // The concise CLI header contains key=value fields. A quoted value or the
+  // separate Next line cannot supply a routing field.
+  const [header] = output.split(/\r?\n/, 1)
+  if (!header.startsWith('dispatchId=')) return
+  const pairs = [...header.matchAll(/(?:^| )([a-zA-Z][\w.]*)=("(?:[^"\\]|\\.)*"|[^"\s]+)/gy)]
+  if (pairs.map(([pair]) => pair).join('') !== header) return
+  const fields = Object.fromEntries(pairs.map(([, key, value]) => [key, value]))
+  if (
+    Object.keys(fields).length !== pairs.length ||
+    fields.mode !== 'terminal' ||
+    !/^task_[\da-z-]{1,128}$/i.test(fields.taskId)
+  )
+    return
+  return readyWorker(fields)
+}
+
 export function receiptOf(action, event) {
   const output = event.output?.stdout ?? event.output
   if (typeof output !== 'string' || output.length > 262144 || event.output?.is_error) return
   if (!action.json) {
+    if (action.verb === 'worker-start') return plainWorkerReceipt(output)
     if (action.verb === 'send' || action.verb === 'reply') {
       const id = /^messageId=(msg_[\da-z-]{1,128})(?=\s|$)/i.exec(output)?.[1]
       if (id && id !== action.replyTo) return { id }
@@ -139,17 +169,7 @@ export function receiptOf(action, event) {
     )
       return { terminal: outcome.handle }
   }
-  if (
-    action.verb === 'worker-start' &&
-    r.state === 'ready' &&
-    (r.mode === undefined || r.mode === 'terminal') &&
-    typeof r.terminal === 'string' &&
-    term.test(r.terminal) &&
-    typeof r.dispatchId === 'string' &&
-    dispatch.test(r.dispatchId)
-  ) {
-    return { terminal: r.terminal, dispatch: 'dispatch:' + r.dispatchId }
-  }
+  if (action.verb === 'worker-start') return readyWorker(r)
 }
 
 const LIMIT = 512

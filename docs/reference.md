@@ -110,10 +110,12 @@ Agents Director custom editor at five-minute zoom and `orca plugin shot`.
   An ordinary mailbox check reporting that ID confirms retrieval at the receiver.
   The arrow stays at the send receipt time. Its detail gives the retrieval time.
   A diamond denotes a confirmed mailbox input when the sender is unobserved.
-- New-terminal JSON receipts from `agent launch`, `worktree create --agent` and ready `orchestration worker-start`
-  receipts can supply a child handle. A solid curve requires its first observed
-  public session identity and a public session creation time at or after the
-  launch began. Worker starts accept `--spec`, `--spec-file` and `--task`,
+- Terminal launch receipts from `agent launch --json`, `worktree create --agent --json`
+  and a ready `orchestration worker-start` can supply a child handle. Worker starts
+  support JSON and the default concise receipt with explicit `mode=terminal`.
+  A solid curve requires the first observed public session identity and a public
+  session creation time at or after launch began. Worker starts accept
+  `--spec`, `--spec-file` and `--task`,
   including a task title and a base branch for a new worktree. An attached
   existing terminal (`--terminal`) can establish a dispatch address.
   It cannot create a parent relationship. `agent resume` is excluded.
@@ -131,9 +133,10 @@ Agents Director custom editor at five-minute zoom and `orca plugin shot`.
   these receipts stay in memory. A run-scoped check requires an explicit terminal
   matching the hook's own terminal.
 - Parsing accepts a direct `orca` or `"$ORCA_CLI_BIN_DIR/orca"` command, plain send/reply receipts or JSON,
-  and ordinary check text (first message) or JSON (up to 200). Compound shells,
-  redirects, substitutions, failed calls, cross-server sends, replay commands,
-  ambiguous ownership and group sends are excluded. Both tool phases must have
+  concise worker-start receipts, and ordinary check text (first message) or JSON
+  (up to 200). Compound shells, redirects, substitutions, failed calls,
+  cross-server sends, replay commands, ambiguous ownership and group sends are
+  excluded. Both tool phases must have
   matching call and terminal IDs. An unresolved receipt stays in memory for up
   to two minutes, with 512 entries per pending collection. A direct accepted
   arrow can be confirmed later while retained in the seven-day cache.

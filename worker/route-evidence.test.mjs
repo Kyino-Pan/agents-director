@@ -162,6 +162,50 @@ test('attached worker-start maps its exact dispatch without assigning a new pare
   assert.equal(f.store.messages.size, 1)
 })
 
+const plainStart =
+  'orca orchestration worker-start --spec-file /absent/probe --worktree current --agent codex'
+const plainReady =
+  'dispatchId=ctx_new taskId=task_1 runId=run_123 runCreated=true state=ready agent=codex ' +
+  'mode=terminal terminal=term_new workspace="/lab/a workspace"'
+
+test('a concise worker-start receipt links a fresh session or binds an attached dispatch', () => {
+  const fresh = probe()
+  fresh.hooks('term_a', plainStart)(plainReady + '\nNext: end your turn')
+  fresh.add('term_new', 'child', Date.now() + 500)
+  fresh.routes.refresh()
+  assert.equal(fresh.store.agents.get('child').parentId, 'sender')
+
+  const attached = probe()
+  attached.hooks(
+    'term_a',
+    'orca orchestration worker-start --task task_1 --terminal term_b'
+  )(plainReady.replace('terminal=term_new', 'terminal=term_b'))
+  attached.hooks('term_a', send.replace('term_b', 'dispatch:ctx_new'))(accepted)
+  assert.equal(attached.store.agents.get('receiver').parentId, undefined)
+  assert.equal(attached.store.messages.get('public-mail:msg_123').to, 'receiver')
+})
+
+test('concise worker-start receipts require unambiguous ready terminal fields on the header', () => {
+  for (const output of [
+    plainReady.replace('state=ready', 'state=outcome_unknown'),
+    plainReady.replace('mode=terminal', 'mode=chat'),
+    plainReady.replace('mode=terminal ', ''),
+    plainReady.replace('taskId=task_1', 'taskId=unknown'),
+    plainReady.replace('terminal=term_new ', '') + '\nNext: terminal=term_new',
+    plainReady.replace('terminal=term_new ', 'hint="label terminal=term_new" '),
+    plainReady + ' terminal=term_other',
+    'prefix\n' + plainReady
+  ]) {
+    const f = probe()
+    f.hooks('term_a', plainStart)(output)
+    f.add('term_new', 'child', Date.now() + 500)
+    f.routes.refresh()
+    assert.equal(f.store.agents.get('child').parentId, undefined, output)
+    f.hooks('term_a', send.replace('term_b', 'dispatch:ctx_new'))(accepted)
+    assert.equal(f.store.messages.size, 0, output)
+  }
+})
+
 test('an identified new-worktree agent and a duplicated cross-session call ID', () => {
   const f = probe()
   const finish = f.hooks(
