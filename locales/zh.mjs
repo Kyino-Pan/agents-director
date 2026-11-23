@@ -7,7 +7,7 @@ export default {
   Connecting: '正在连接',
   'Find an agent, ID or workspace': '查找代理、ID 或工作区',
   'Find name, ID or workspace…': '搜索名称、ID 或工作区…',
-  'Group related lanes': '关联泳道靠近排列',
+  'Group related lanes': '拉近关联会话',
   'Place lanes connected by messages or spawns closer together.':
     '将通过消息或派生关系连接的泳道排得更近。',
   'Hide short tasks (< 3 min)': '隐藏短任务（< 3 分钟）',

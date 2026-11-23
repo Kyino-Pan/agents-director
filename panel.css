@@ -46,6 +46,31 @@ button[aria-pressed='true'] {
   background: var(--orca-accent);
   color: var(--orca-accent-foreground);
 }
+.toolbar-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.toolbar-toggle::before {
+  content: '';
+  width: 5px;
+  height: 9px;
+  border: solid transparent;
+  border-width: 0 2px 2px 0;
+  transform: translateY(-1px) rotate(45deg);
+}
+.toolbar-toggle[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--activity-working) 15%, var(--orca-background));
+  border-color: var(--activity-working);
+  color: var(--orca-foreground);
+}
+.toolbar-toggle[aria-pressed='true']::before {
+  border-color: currentColor;
+}
+.toolbar-toggle[aria-pressed='true']:hover {
+  background: color-mix(in srgb, var(--activity-working) 26%, var(--orca-background));
+}
 button:disabled {
   opacity: 0.5;
   cursor: default;
