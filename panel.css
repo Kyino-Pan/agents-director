@@ -454,6 +454,11 @@ input::placeholder {
 .segment.current.working {
   fill: var(--activity-active);
 }
+.observation-tick {
+  stroke: var(--state);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
 .segment-hit {
   fill: transparent;
 }
@@ -514,12 +519,17 @@ input::placeholder {
   stroke-width: 1;
   opacity: 0.5;
 }
+.unobserved-endpoint {
+  fill: var(--orca-background);
+  stroke: var(--orca-foreground);
+  opacity: 1;
+}
 .message-target:hover .message-path,
 .message-target[data-selected='true'] .message-path {
   opacity: 1;
   stroke-width: 1.5;
 }
-.message-target[data-selected='true'] .message-dot {
+.message-target[data-selected='true'] .message-dot:not(.unobserved-endpoint) {
   fill: var(--orca-foreground);
 }
 .empty {

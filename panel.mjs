@@ -1,3 +1,4 @@
+import { segmentAt } from './timeline-evidence.mjs'
 import { DetailInputs } from './panel-inputs.mjs'
 import {
   activeAgents,
@@ -21,6 +22,14 @@ const STATES = new Set(['working', 'blocked', 'waiting', 'done', 'unknown'])
 const $ = (id) => document.getElementById(id)
 const locale = window.orca?.locale || navigator.language
 const timeFormat = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' })
+const eventTime = new Intl.DateTimeFormat(locale, {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  fractionalSecondDigits: 3
+})
 const dayFormat = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' })
 const dayHourFormat = new Intl.DateTimeFormat(locale, {
   month: 'short',
@@ -127,7 +136,13 @@ function unobservedDescription(agent, segment) {
   const previous = agent.segments.findLast(
     (item) => item.end <= (segment?.start ?? Infinity) && stateOf(item) !== 'unknown'
   )
-  return `No reliable state observation covers this interval. Missing or stale logs cannot confirm continued work.${previous ? `\nLast observed: ${stateLabel(stateOf(previous))} through ${dateFormat.format(previous.end)}.` : '\nNo earlier state observation is available in this snapshot.'}`
+  const omitted = overlapsOmittedRange(
+    agent,
+    previous?.end ?? -Infinity,
+    segment?.start ?? Infinity
+  )
+  const last = omitted ? 'Last retained observation' : 'Last observed'
+  return `No reliable state observation covers this interval. Missing or stale logs cannot confirm continued work.${previous ? `\n${last}: ${stateLabel(stateOf(previous))} through ${dateFormat.format(previous.end)}.` : '\nNo earlier state observation is available in this snapshot.'}`
 }
 
 function evidenceInWindow(agent, start, end, hasMessages) {
@@ -139,7 +154,11 @@ function evidenceInWindow(agent, start, end, hasMessages) {
   let detail = 'No state interval is available in this window.'
   if (last) {
     const state = stateLabel(last.state)
-    label = last.end >= end ? state : `Last: ${state}`
+    label = state
+    if (last.end < end) {
+      const prefix = overlapsOmittedRange(agent, last.end, end) ? 'Last retained' : 'Last'
+      label = `${prefix}: ${state}`
+    }
     detail = `${state} observed through ${dateFormat.format(Math.min(last.end, end))} in this window.`
   } else if (limited) {
     label = 'History limited'
@@ -149,8 +168,14 @@ function evidenceInWindow(agent, start, end, hasMessages) {
       'Coordination messages are recorded in this window. No execution state interval is available here.'
   }
   if (limited)
-    detail += ` This window overlaps the range where the snapshot omitted ${agent.omittedSegments} earlier segments on this lane.`
+    detail += ` Some intervals in this window were omitted from the snapshot (${agent.omittedSegments} segments omitted across this lane).`
   return { state: stateOf(last), label, detail }
+}
+
+function segmentDuration(ms) {
+  if (ms < 1000) return `${ms} ms`
+  if (ms < 60000) return `${ms / 1000} s`
+  return duration(ms)
 }
 
 function duration(ms) {
@@ -182,6 +207,7 @@ function render() {
     Math.max(snapshot.windowStart + hours * HOUR, viewEnd ?? snapshot.now)
   )
   const start = Math.max(snapshot.windowStart, end - hours * HOUR)
+  const inWindow = (segment) => segment.end > start && segment.start < end
   const active = gestureAgents
     ? activeAgents(snapshot, start, end)
     : visibleAgents(snapshot, start, end, preferences.compactLanes)
@@ -232,6 +258,10 @@ function render() {
     (message) => (message.from === null || rowById.has(message.from)) && rowById.has(message.to)
   )
   if (selection?.agent && !rowById.has(selection.agent)) selection = null
+  if (selection?.start !== undefined) {
+    const segment = segmentAt(currentAgents.get(selection.agent)?.segments ?? [], selection.start)
+    if (segment?.start !== selection.start || !inWindow(segment)) selection = null
+  }
   if (selection?.message) {
     const visible = new Set(messages.map((item) => item.id))
     if (!visible.has(selection.message)) {
@@ -320,10 +350,12 @@ function render() {
   const marker = svg('marker', {
     id: 'message-arrow',
     viewBox: '0 0 8 8',
-    refX: 7,
+    // Place the arrowhead just outside the receiving track so its direction
+    // stays visible on a working bar of the same color.
+    refX: 11,
     refY: 4,
-    markerWidth: 6,
-    markerHeight: 6,
+    markerWidth: 8,
+    markerHeight: 8,
     orient: 'auto-start-reverse'
   })
   marker.append(
@@ -375,7 +407,7 @@ function render() {
     // Their labels and click details still describe the actual short transitions.
     let run
     for (const segment of agent.segments) {
-      if (segment.end <= start || segment.start >= end) continue
+      if (!inWindow(segment)) continue
       if (segment.state !== 'working' && !segment.joinedWork) {
         run = null
         continue
@@ -397,15 +429,15 @@ function render() {
       run.rect?.setAttribute('width', x(Math.min(end, segment.end)) - run.left)
     }
     agent.segments.forEach((segment, index) => {
-      if (segment.end <= start || segment.start >= end) {
+      if (!inWindow(segment)) {
         return
       }
       const left = x(Math.max(start, segment.start))
       const barWidth = Math.max(0, x(Math.min(end, segment.end)) - left)
       const state = stateOf(segment)
       const paint = segment.joinedWork ? 'working' : state
-      const key = `segment:${agent.id}:${segment.start}:${index}`
-      const label = `${agentName(agent)}: ${stateLabel(state)}, ${dateFormat.format(segment.start)} to ${timeFormat.format(segment.end)}, ${duration(segment.end - segment.start)}`
+      const key = `segment:${agent.id}:${segment.start}`
+      const label = `${agentName(agent)}: ${stateLabel(state)}, ${dateFormat.format(segment.start)} to ${timeFormat.format(segment.end)}, ${segmentDuration(segment.end - segment.start)}`
       const group = svg('g', {
         class: 'segment-target',
         role: 'button',
@@ -434,6 +466,19 @@ function render() {
           class: `segment ${paint}${segment.end >= end ? ' current' : ''}`
         })
       )
+      // A vertical tick marks an observation too narrow to see at this zoom.
+      // Its horizontal bar keeps the measured duration, including subpixel widths.
+      if (barWidth < 1 && state !== 'unknown') {
+        group.append(
+          svg('line', {
+            x1: left + barWidth / 2,
+            x2: left + barWidth / 2,
+            y1: center(agent.id) - 5,
+            y2: center(agent.id) + 5,
+            class: `observation-tick ${state}`
+          })
+        )
+      }
       segments.append(group)
     })
   })
@@ -479,6 +524,9 @@ function render() {
     const path = messagePath(at, from, to)
     const fromName = input ? 'Mailbox input' : agentName(agents[rowById.get(message.from)])
     const toName = agentName(agents[rowById.get(message.to)])
+    const observedAt = (id) =>
+      stateOf(segmentAt(currentAgents.get(id).segments, message.at)) !== 'unknown'
+    const fromObserved = !input && observedAt(message.from)
     const counts = new Map()
     for (const item of bin) counts.set(item.type, (counts.get(item.type) ?? 0) + 1)
     const mixed = counts.size > 1
@@ -486,7 +534,7 @@ function render() {
       bin.length === 1
         ? message.subject || message.type
         : [...counts].map(([type, count]) => `${count} ${type}`).join(', ')
-    const label = `${fromName} to ${toName}, ${timeFormat.format(message.at)}: ${summary}`
+    const label = `${fromName} to ${toName}, ${eventTime.format(message.at)}: ${summary}`
     const ids = bin.map((item) => item.id)
     if (selection?.message && ids.includes(selection.message)) {
       selection.key = 'message:' + message.id
@@ -505,24 +553,34 @@ function render() {
       'data-status': mixed ? 'Mixed' : message.type,
       'data-message-ids': JSON.stringify(ids)
     })
-    group.append(
-      svg('title', {}, label),
-      ...(input
-        ? [
-            svg('circle', { cx: at, cy: to, r: 7, fill: 'transparent' }),
-            svg('path', { d: `M ${at} ${to - 4} l 4 4 -4 4 -4 -4 Z`, class: 'mailbox-input' })
-          ]
-        : [
-            svg('path', { d: path, class: 'message-hit' }),
-            svg('path', { d: path, class: 'message-path', 'marker-end': 'url(#message-arrow)' }),
-            svg('circle', {
-              cx: at,
-              cy: from === to ? from - 12 : from,
-              r: 2,
-              class: 'message-dot'
-            })
-          ])
-    )
+    group.append(svg('title', {}, label))
+    if (input) {
+      group.append(
+        svg('circle', { cx: at, cy: to, r: 7, fill: 'transparent' }),
+        svg('path', { d: `M ${at} ${to - 4} l 4 4 -4 4 -4 -4 Z`, class: 'mailbox-input' })
+      )
+    } else {
+      if (!observedAt(message.to)) {
+        group.append(
+          svg('circle', {
+            cx: from === to ? at + 2 : at,
+            cy: from === to ? to + 12 : to,
+            r: 4,
+            class: 'unobserved-endpoint recipient'
+          })
+        )
+      }
+      group.append(
+        svg('path', { d: path, class: 'message-hit' }),
+        svg('path', { d: path, class: 'message-path', 'marker-end': 'url(#message-arrow)' }),
+        svg('circle', {
+          cx: at,
+          cy: from === to ? from - 12 : from,
+          r: fromObserved ? 2 : 4,
+          class: fromObserved ? 'message-dot' : 'message-dot unobserved-endpoint'
+        })
+      )
+    }
     if (bin.length > 1) {
       group.append(
         svg('text', { x: at + 3, y: (from + to) / 2, class: 'message-count' }, String(bin.length))
@@ -546,12 +604,11 @@ function renderDetail() {
     selection,
     displayed,
     node,
-    timeFormat,
-    dateFormat,
+    eventTime,
     stateOf,
     stateLabel,
     laneEvidence,
-    duration,
+    duration: segmentDuration,
     unobservedDescription
   })
   detailInputs.select(

@@ -22,8 +22,10 @@ session identity can show observed states, but cannot be resumed by this plugin.
 - Search by name, identity or workspace.
 - Select a lane or state for details; copy its identity from the detail panel.
   The lane label uses state intervals in the selected window. “Last: Done” gives
-  the last observed state when coverage ends before the right edge. “Messages only”
-  means the window contains communication but no available execution interval.
+  the last observed state when coverage ends before the right edge. If later intervals
+  in the window were omitted, “Last retained: Done” identifies the last available
+  observation. “Messages only” means the window contains communication but no
+  available execution interval.
   Select an individual gap to see its coverage.
 - Use the window slider, duration presets, From/To controls, pan or modified wheel
   to inspect a period from five minutes to seven days.
@@ -79,9 +81,11 @@ custom profile directories, copied databases or direct remote-file reads.
 Session history is bounded to the newest 200 sessions across workspaces, and the
 host may truncate workspace/project lists. Source details report these limits.
 The snapshot includes up to 160 lanes, 4,000 segments across those lanes and
-600 messages. When demand exceeds 4,000 segments, sparse lanes keep their
-history first. Dense lanes share the remaining budget and keep their most
-recent consecutive intervals. A window overlapping omitted intervals keeps
+600 messages. When demand exceeds 4,000 segments, the snapshot first reserves the
+existing intervals covering both endpoints at the plotted message time, the
+receiver at retrieval, and each lane's latest interval. Sparse lanes keep
+their full history when it fits. Dense lanes share the budget and fill their
+remaining places with recent intervals. A window overlapping omitted intervals keeps
 the lane visible, even with no messages. “History limited” appears when such
 a window contains no retained state interval. The recorder bounds
 points and messages at 5,000 each.
@@ -116,7 +120,12 @@ Agents Director custom editor at five-minute zoom and `orca plugin shot`.
 - A dotted send attempt can appear while a directly addressed call is in progress.
   It expires in memory. A successful single-message receipt records acceptance.
   An ordinary mailbox check reporting that ID confirms retrieval at the receiver.
-  The arrow stays at the send receipt time. Its detail gives the retrieval time.
+  The arrow stays at the send receipt time. Message details show both lane states
+  at that time and the receiver's state at retrieval. A larger open circle marks
+  an endpoint without an observed state. A vertical tick marks an observed
+  interval narrower than one pixel at the current zoom. The horizontal bar and
+  its detail keep the measured duration. Grouped arrows use the first message's
+  position. Select a group member to inspect its own times and observations.
   A diamond denotes a confirmed mailbox input when the sender is unobserved.
 - Terminal launch receipts from `agent launch --json`, `worktree create --agent --json`
   and a ready `orchestration worker-start` can supply a child handle. Worker starts

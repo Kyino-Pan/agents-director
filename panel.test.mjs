@@ -836,6 +836,19 @@ test('dense history shows window-local evidence on lanes and in details', async 
   }
 })
 
+async function setDenseWindow(page, from, to) {
+  await page.evaluate(
+    ([from, to]) => {
+      const start = document.getElementById('range-start')
+      const end = document.getElementById('range-end')
+      start.value = '2026-11-02T' + from
+      end.value = '2026-11-02T' + to
+      end.dispatchEvent(new Event('change'))
+    },
+    [from, to]
+  )
+}
+
 for (const [surface, width, height] of [
   ['panel', 600, 995],
   ['editor', 920, 600]
@@ -852,27 +865,15 @@ for (const [surface, width, height] of [
     const { page, errors } = await pageFor({ width, height, data: recorder.snapshot(fixtureNow) })
     const lane = page.locator('.lane[data-agent="Coordinator"]')
     const bars = page.locator('.segment-target[data-agent="Coordinator"]')
-    async function setWindow(from, to) {
-      await page.evaluate(
-        ([from, to]) => {
-          const start = document.getElementById('range-start')
-          const end = document.getElementById('range-end')
-          start.value = '2026-11-02T' + from
-          end.value = '2026-11-02T' + to
-          end.dispatchEvent(new Event('change'))
-        },
-        [from, to]
-      )
-    }
     try {
       for (const [from, to, label, messages] of [
         ['07:58', '08:03', 'Messages only', 3],
-        ['09:58', '10:03', 'History limited', 1],
+        ['09:59', '10:04', 'Last retained: Working', 1],
         ['10:10', '10:15', 'History limited', 0]
       ]) {
-        await setWindow(from, to)
+        await setDenseWindow(page, from, to)
         assert.equal(await lane.locator('.lane-state').textContent(), label)
-        assert.equal(await bars.count(), 0)
+        assert.equal(await bars.count(), messages === 1 ? 1 : 0)
         assert.match(
           await page.locator('#summary').textContent(),
           new RegExp('· ' + messages + ' coordination messages$')
@@ -884,7 +885,7 @@ for (const [surface, width, height] of [
           assert.match(detail, /Coordination messages/)
           assert.doesNotMatch(detail, /omitted/)
         } else {
-          assert.match(detail, /omitted 555 earlier segments/)
+          assert.match(detail, /555 segments omitted across this lane/)
         }
         if (process.env.ACTIVITY_SCREENSHOTS) {
           await mkdir(process.env.ACTIVITY_SCREENSHOTS, { recursive: true })
@@ -895,19 +896,21 @@ for (const [surface, width, height] of [
         }
         await page.keyboard.press('Escape')
       }
-      // The omitted range is [09:20:00, 13:57:30). Touching either endpoint
+      // The final omitted range ends at 13:58. Touching an endpoint
       // has zero overlap. One second inside the range is enough.
-      await setWindow('09:15', '09:20')
+      await setDenseWindow(page, '09:15', '09:20')
       assert.equal(await lane.count(), 0)
-      await setWindow('09:15:01', '09:20:01')
+      await setDenseWindow(page, '09:15:01', '09:20:01')
       assert.equal(await lane.locator('.lane-state').textContent(), 'History limited')
       for (const [from, overlaps] of [
-        ['13:57:29', true],
-        ['13:57:30', false]
+        ['13:57:59', true],
+        ['13:58:00', false]
       ]) {
-        await setWindow(from, '14:03')
+        await setDenseWindow(page, from, '14:03')
         assert.ok((await bars.count()) > 0)
+        assert.equal(await lane.locator('.lane-state').textContent(), 'Last: Working')
         await lane.click()
+        assert.equal(await page.locator('#detail-meta').textContent(), 'Last: Working')
         assert.equal(
           (await page.locator('#detail-body').textContent()).includes('omitted'),
           overlaps
@@ -920,3 +923,138 @@ for (const [surface, width, height] of [
     }
   })
 }
+
+test('selected segment follows its lane and start through refresh, trimming and window changes', async () => {
+  const recorder = denseRecorder()
+  const ten = fixtureNow - 6 * 3600000
+  recorder.point('peer-at-ten', 'Peer', ten, 'working', 'live', ten + 30000)
+  const unpinned = recorder.snapshot(fixtureNow)
+  function addReceipt(id, minutesBeforeNow) {
+    recorder.message({
+      id,
+      from: 'Reviewer',
+      to: 'Coordinator',
+      at: fixtureNow - minutesBeforeNow * 60000,
+      type: 'Send accepted'
+    })
+    return recorder.snapshot(fixtureNow)
+  }
+  const pinned = addReceipt('pin-1000', 360)
+  const { page, errors } = await pageFor({ data: pinned })
+  const bar = page.locator('.segment-target[data-agent="Coordinator"]:has(.segment.working)')
+  const detail = page.locator('#detail')
+  const selected = page.locator('.segment-target[data-selected="true"]')
+  const refresh = (snapshot) =>
+    page.evaluate((data) => {
+      window.testSnapshot = data
+      window.notifyActivity()
+    }, snapshot)
+  try {
+    await setDenseWindow(page, '09:59', '10:04')
+    await bar.press('Enter')
+    const meta = await page.locator('#detail-meta').textContent()
+    assert.match(meta, /10:00:00.*10:00:30/)
+    assert.equal(await bar.getAttribute('data-segment'), '0')
+    const both = addReceipt('pin-0940', 380)
+    await refresh(both)
+    await page.locator('.segment-target[data-agent="Coordinator"][data-segment="1"]').waitFor()
+    for (const [from, to] of [
+      ['09:59', '10:04'],
+      ['09:55:15', '10:00:15'],
+      ['10:00:15', '10:05:15']
+    ]) {
+      await setDenseWindow(page, from, to)
+      assert.equal(await selected.count(), 1)
+      assert.equal(await bar.getAttribute('data-selected'), 'true')
+      assert.equal(await detail.isVisible(), true)
+      assert.equal(
+        await page.locator('#detail-heading').textContent(),
+        'Coordinator session · Working'
+      )
+      assert.equal(await page.locator('#detail-meta').textContent(), meta)
+    }
+    // Jump away while the lane still exists. Returning must not reopen stale detail.
+    await setDenseWindow(page, '10:10', '10:15')
+    assert.equal(
+      await page.locator('.lane[data-agent="Coordinator"] .lane-state').textContent(),
+      'History limited'
+    )
+    assert.equal(await selected.count(), 0)
+    assert.equal(await detail.isHidden(), true)
+    await setDenseWindow(page, '09:59', '10:04')
+    assert.equal(await bar.getAttribute('data-selected'), 'false')
+    await bar.press('Enter')
+    await refresh(unpinned)
+    await bar.waitFor({ state: 'detached' })
+    assert.equal(await detail.isHidden(), true)
+    const peer = page.locator('.segment-target[data-agent="Peer"]:has(.segment.working)')
+    assert.equal(await peer.getAttribute('data-selected'), 'false')
+    await refresh(both)
+    await bar.waitFor()
+    assert.equal(await bar.getAttribute('data-selected'), 'false')
+    assert.equal(await detail.isHidden(), true)
+    assert.deepEqual(errors, [])
+  } finally {
+    await page.close()
+  }
+})
+
+test('zoom preserves measured widths and grouped messages describe each endpoint at its own time', async () => {
+  const data = structuredClone(snapshot)
+  const at = data.now - 90000
+  const [sender, receiver] = data.agents
+  sender.segments = [{ start: at, end: at + 900, state: 'working', source: 'live' }]
+  receiver.segments = [{ start: at + 1000, end: at + 2500, state: 'blocked', source: 'live' }]
+  data.agents = [sender, receiver]
+  const base = {
+    from: sender.id,
+    to: receiver.id,
+    at,
+    type: 'Mailbox received',
+    deliveredAt: at + 1100
+  }
+  data.messages = [
+    { ...base, id: 'first' },
+    { ...base, id: 'second', at: at + 1200, deliveredAt: at + 4000 }
+  ]
+  const { page, errors } = await pageFor({ data })
+  try {
+    const group = page.locator('.message-target')
+    const bar = page.locator(`.segment-target[data-agent="${sender.id}"] .segment`)
+    // ResizeObserver can replace the entire SVG between Playwright calls.
+    const width = () =>
+      page.evaluate(
+        (id) =>
+          document.querySelector(`.segment-target[data-agent="${id}"] .segment`).getBBox().width,
+        sender.id
+      )
+    await page.locator('.observation-tick.working').waitFor({ state: 'attached' })
+    const lowWidth = await width()
+    assert.ok(lowWidth > 0 && lowWidth < 1)
+    assert.equal(await group.count(), 1)
+    assert.equal(await page.locator('.observation-tick.working').count(), 1)
+    assert.equal(await group.locator('.unobserved-endpoint.recipient').count(), 1)
+    await group.press('Enter')
+    const detail = page.locator('#detail-body')
+    assert.match(
+      await detail.textContent(),
+      /At send .*Sender: Working · Receiver: No observed state\nAt retrieval .*Receiver: Blocked/
+    )
+    await page.locator('#related-messages button').last().click()
+    assert.match(
+      await detail.textContent(),
+      /At send .*Sender: No observed state · Receiver: Blocked\nAt retrieval .*Receiver: No observed state/
+    )
+    await page.keyboard.press('Escape')
+    await page.getByRole('slider', { name: 'Window' }).focus()
+    await page.keyboard.press('Home')
+    const highWidth = await width()
+    assert.ok(highWidth >= 1 && Math.abs(highWidth / lowWidth - 288) < 0.01)
+    assert.equal(await page.locator('.observation-tick.working').count(), 0)
+    await bar.locator('..').press('Enter')
+    assert.match(await page.locator('#detail-meta').textContent(), /900 ms/)
+    assert.deepEqual(errors, [])
+  } finally {
+    await page.close()
+  }
+})

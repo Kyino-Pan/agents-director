@@ -25,6 +25,7 @@ before(async () => {
       '/panel-actions.mjs': ['panel-actions.mjs', 'text/javascript'],
       '/lane-order.mjs': ['lane-order.mjs', 'text/javascript'],
       '/lane-motion.mjs': ['lane-motion.mjs', 'text/javascript'],
+      '/timeline-evidence.mjs': ['timeline-evidence.mjs', 'text/javascript'],
       '/view-preferences.mjs': ['view-preferences.mjs', 'text/javascript']
     }
     const entry = files[request.url]
