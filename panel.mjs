@@ -350,8 +350,7 @@ function render() {
   const marker = svg('marker', {
     id: 'message-arrow',
     viewBox: '0 0 8 8',
-    // Place the arrowhead just outside the receiving track so its direction
-    // stays visible on a working bar of the same color.
+    // Place the arrowhead just outside the receiving track to keep its direction visible.
     refX: 11,
     refY: 4,
     markerWidth: 8,
@@ -466,19 +465,6 @@ function render() {
           class: `segment ${paint}${segment.end >= end ? ' current' : ''}`
         })
       )
-      // A vertical tick marks an observation too narrow to see at this zoom.
-      // Its horizontal bar keeps the measured duration, including subpixel widths.
-      if (barWidth < 1 && state !== 'unknown') {
-        group.append(
-          svg('line', {
-            x1: left + barWidth / 2,
-            x2: left + barWidth / 2,
-            y1: center(agent.id) - 5,
-            y2: center(agent.id) + 5,
-            class: `observation-tick ${state}`
-          })
-        )
-      }
       segments.append(group)
     })
   })

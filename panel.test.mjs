@@ -394,6 +394,17 @@ test('thin history tracks keep accessible states and generous targets in both ho
           source: 'fixture'
         })
       )
+    },
+    {
+      id: 'run',
+      label: 'Joined run',
+      projectId: 'p',
+      projectName: 'Project',
+      segments: [
+        { start: ago(2), end: ago(1), state: 'working' },
+        { start: ago(1), end: ago(1) + 1000, state: 'waiting', joinedWork: true },
+        { start: ago(1) + 1000, end: data.now, state: 'working' }
+      ]
     }
   ]
   data.messages = []
@@ -407,6 +418,27 @@ test('thin history tracks keep accessible states and generous targets in both ho
           dark ? 'dark' : 'light'
         )
         assert.equal(await page.locator('#chart text, #chart pattern').count(), 0)
+        const bamboo = dark ? 'rgb(163, 199, 128)' : 'rgb(87, 124, 55)'
+        assert.equal(
+          await page
+            .locator('.swatch.working')
+            .evaluate((el) => getComputedStyle(el).backgroundColor),
+          bamboo
+        )
+        for (const selector of [
+          '.segment.working:not(.current)',
+          '.segment.working.current',
+          '.run-bar'
+        ]) {
+          assert.equal(
+            await page
+              .locator(selector)
+              .first()
+              .evaluate((el) => getComputedStyle(el).fill),
+            bamboo,
+            selector
+          )
+        }
         for (const state of ['working', 'blocked', 'waiting', 'done', 'unknown']) {
           // A ResizeObserver redraw replaces SVG children. Resolve and measure within
           // one browser task so a detached locator handle cannot supply zero geometry.
@@ -1028,11 +1060,12 @@ test('zoom preserves measured widths and grouped messages describe each endpoint
           document.querySelector(`.segment-target[data-agent="${id}"] .segment`).getBBox().width,
         sender.id
       )
-    await page.locator('.observation-tick.working').waitFor({ state: 'attached' })
+    await bar.waitFor({ state: 'attached' })
     const lowWidth = await width()
     assert.ok(lowWidth > 0 && lowWidth < 1)
     assert.equal(await group.count(), 1)
-    assert.equal(await page.locator('.observation-tick.working').count(), 1)
+    assert.equal(await page.locator('.segment-target line').count(), 0)
+    assert.equal(await bar.locator('..').locator('.segment-hit').getAttribute('width'), '8')
     assert.equal(await group.locator('.unobserved-endpoint.recipient').count(), 1)
     await group.press('Enter')
     const detail = page.locator('#detail-body')
@@ -1050,7 +1083,6 @@ test('zoom preserves measured widths and grouped messages describe each endpoint
     await page.keyboard.press('Home')
     const highWidth = await width()
     assert.ok(highWidth >= 1 && Math.abs(highWidth / lowWidth - 288) < 0.01)
-    assert.equal(await page.locator('.observation-tick.working').count(), 0)
     await bar.locator('..').press('Enter')
     assert.match(await page.locator('#detail-meta').textContent(), /900 ms/)
     assert.deepEqual(errors, [])

@@ -122,9 +122,9 @@ Agents Director custom editor at five-minute zoom and `orca plugin shot`.
   An ordinary mailbox check reporting that ID confirms retrieval at the receiver.
   The arrow stays at the send receipt time. Message details show both lane states
   at that time and the receiver's state at retrieval. A larger open circle marks
-  an endpoint without an observed state. A vertical tick marks an observed
-  interval narrower than one pixel at the current zoom. The horizontal bar and
-  its detail keep the measured duration. Grouped arrows use the first message's
+  an endpoint without an observed state. Each horizontal bar shows its measured
+  duration, even below one pixel. Zoom in to inspect a short interval or select
+  its hit target for the exact duration. Grouped arrows use the first message's
   position. Select a group member to inspect its own times and observations.
   A diamond denotes a confirmed mailbox input when the sender is unobserved.
 - Terminal launch receipts from `agent launch --json`, `worktree create --agent --json`
@@ -216,6 +216,7 @@ receiver-only row in an existing installation, cannot be inferred from these cou
 
 ### Working intervals
 
+Working bars use bamboo green in both host themes.
 The timeline joins working observations on the same lane when the gap from one
 end to the next start is strictly below 30,000 ms. Chains can include short
 waiting, blocked and unknown intervals. A completion ends a chain, including

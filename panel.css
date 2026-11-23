@@ -1,7 +1,6 @@
 :root {
   color-scheme: light dark;
-  --activity-working: color-mix(in srgb, var(--orca-foreground) 55%, var(--orca-background));
-  --activity-active: var(--orca-foreground);
+  --activity-working: light-dark(#577c37, #a3c780);
   --activity-blocked: color-mix(in srgb, var(--orca-destructive) 70%, var(--orca-background));
   --activity-waiting: color-mix(in srgb, var(--orca-foreground) 28%, var(--orca-background));
   --activity-done: color-mix(in srgb, var(--orca-foreground) 16%, var(--orca-background));
@@ -450,14 +449,6 @@ input::placeholder {
 }
 .segment.unknown {
   fill: var(--orca-border);
-}
-.segment.current.working {
-  fill: var(--activity-active);
-}
-.observation-tick {
-  stroke: var(--state);
-  stroke-width: 1.5;
-  pointer-events: none;
 }
 .segment-hit {
   fill: transparent;
