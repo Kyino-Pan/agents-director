@@ -106,6 +106,7 @@ export function renderActivityDetail(context) {
     dateFormat,
     stateOf,
     stateLabel,
+    laneEvidence,
     duration,
     unobservedDescription
   } = context
@@ -166,12 +167,9 @@ export function renderActivityDetail(context) {
     renderIdentity([agent], node, displayed)
     if (!segment) {
       $('detail-heading').textContent = agentName(agent)
-      $('detail-meta').textContent = ''
-      $('detail-body').textContent = ''
-      const last = agent.segments.at(-1)
-      if (stateOf(last) === 'unknown') {
-        $('detail-body').textContent = unobservedDescription(agent, last)
-      }
+      const evidence = laneEvidence.get(agent.id)
+      $('detail-meta').textContent = evidence?.label ?? ''
+      $('detail-body').textContent = evidence?.detail ?? ''
       return
     }
     const state = stateOf(segment)
@@ -186,6 +184,11 @@ export function renderActivityDetail(context) {
       $('detail-body').textContent +=
         ' The timeline connects the working observations on either side of this short interval.'
   }
+}
+
+export function overlapsOmittedRange(agent, start, end) {
+  const range = agent.omittedRange
+  return range && range.start < end && range.end > start
 }
 
 export function activeAgents(snapshot, start, end) {
@@ -204,6 +207,7 @@ export function activeAgents(snapshot, start, end) {
   return snapshot.agents.filter(
     (agent) =>
       (participants.has(agent.id) ||
+        overlapsOmittedRange(agent, start, end) ||
         (Number.isFinite(agent.spawnedAt) && agent.spawnedAt >= start && agent.spawnedAt <= end) ||
         agent.segments.some((segment) =>
           segment.state === 'done'

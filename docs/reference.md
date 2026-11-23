@@ -21,6 +21,10 @@ session identity can show observed states, but cannot be resumed by this plugin.
 
 - Search by name, identity or workspace.
 - Select a lane or state for details; copy its identity from the detail panel.
+  The lane label uses state intervals in the selected window. “Last: Done” gives
+  the last observed state when coverage ends before the right edge. “Messages only”
+  means the window contains communication but no available execution interval.
+  Select an individual gap to see its coverage.
 - Use the window slider, duration presets, From/To controls, pan or modified wheel
   to inspect a period from five minutes to seven days.
 - Pause view freezes inspection while collection continues.
@@ -74,9 +78,13 @@ custom profile directories, copied databases or direct remote-file reads.
 
 Session history is bounded to the newest 200 sessions across workspaces, and the
 host may truncate workspace/project lists. Source details report these limits.
-The panel retains its existing budgets (160 lanes, 4,000 segments, 600 messages),
-and the recorder bounds points/messages at 5,000 each. These are coverage limits,
-not evidence that omitted sessions did not run.
+The snapshot includes up to 160 lanes, 4,000 segments across those lanes and
+600 messages. When demand exceeds 4,000 segments, sparse lanes keep their
+history first. Dense lanes share the remaining budget and keep their most
+recent consecutive intervals. A window overlapping omitted intervals keeps
+the lane visible, even with no messages. “History limited” appears when such
+a window contains no retained state interval. The recorder bounds
+points and messages at 5,000 each.
 
 **Other coverage limits.** There is no public coordination history feed. Conversation
 bodies, recent user inputs, process memory and private execution metadata are unavailable. The recent-input section explains that
