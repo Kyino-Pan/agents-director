@@ -1,3 +1,4 @@
+import { t } from './panel-i18n.mjs'
 import { harnessIcons } from './assets/orca-harness-icons.mjs'
 
 let iconSequence = 0
@@ -8,7 +9,7 @@ function harnessEntry(agent) {
 }
 
 export function harnessLabel(agent) {
-  return harnessEntry(agent)?.label ?? agent?.provider ?? 'Unknown harness'
+  return harnessEntry(agent)?.label ?? agent?.provider ?? t('Unknown harness')
 }
 
 export function shortAgentId(agent) {

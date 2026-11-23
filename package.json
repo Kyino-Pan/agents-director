@@ -1,13 +1,13 @@
 {
   "name": "agents-director",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "license": "MIT",
   "type": "module",
   "scripts": {
     "test": "node --test --test-concurrency=2 *.test.mjs worker/*.test.mjs",
-    "lint": "oxlint --deny-warnings *.mjs worker/*.mjs scripts/*.mjs assets/orca-harness-icons.mjs",
-    "format:check": "oxfmt --check *.mjs worker/*.mjs *.json *.md *.html *.css assets/preview-theme.css scripts/*.mjs assets/orca-harness-icons.mjs docs/*.md",
+    "lint": "oxlint --deny-warnings *.mjs locales/*.mjs worker/*.mjs scripts/*.mjs assets/orca-harness-icons.mjs",
+    "format:check": "oxfmt --check *.mjs locales/*.mjs worker/*.mjs *.json *.md *.html *.css assets/preview-theme.css scripts/*.mjs assets/orca-harness-icons.mjs docs/*.md",
     "preview": "node preview.mjs"
   },
   "devDependencies": {

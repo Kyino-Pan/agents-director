@@ -1,4 +1,11 @@
-import { segmentAt } from './timeline-evidence.mjs'
+import { projectKey, terminalKey } from './pin-identity.mjs'
+import { t, locale } from './panel-i18n.mjs'
+import {
+  segmentAt,
+  eventInWindow,
+  isActiveState,
+  overlapsOmittedActivity
+} from './timeline-evidence.mjs'
 import { orderProjectLanes } from './lane-order.mjs'
 import { harnessLabel } from './panel-harness.mjs'
 
@@ -24,14 +31,15 @@ const DETAIL_FIELDS = [
 ]
 
 export function agentName(agent) {
-  return agent?.label?.trim() && agent.label !== agent.id
+  return agent?.label?.trim() && agent.label !== agent.id && agent.labelSource !== 'fallback'
     ? agent.label
-    : `${agent?.provider ? harnessLabel(agent) : 'Agent'} session`
+    : t('{provider} session', { provider: agent?.provider ? harnessLabel(agent) : t('Agent') })
 }
 
 export function renderIdentity(agents, node, displayed) {
   const signature = JSON.stringify(
     agents.map((agent) => [
+      locale,
       agent.label,
       ...DETAIL_FIELDS.map(([key]) => agent[key]),
       displayed.agents.find((item) => item.id === agent.parentId)?.label
@@ -52,7 +60,7 @@ export function renderIdentity(agents, node, displayed) {
         const header = node('div', 'identity-heading')
         if (agents.length > 1) header.append(node('strong', '', agentName(agent)))
         if (core) {
-          const copy = node('button', '', 'Copy agent ID')
+          const copy = node('button', '', t('Copy agent ID'))
           copy.type = 'button'
           copy.dataset.copyId = agent.id
           header.append(copy)
@@ -62,12 +70,14 @@ export function renderIdentity(agents, node, displayed) {
           let text = key === 'provider' ? harnessLabel(agent) : agent[key]
           if (key === 'parentId' && text) {
             const parent = displayed.agents.find((item) => item.id === text)
-            text = parent ? `${agentName(parent)} · ${text}` : `${text} (outside this snapshot)`
+            text = parent
+              ? `${agentName(parent)} · ${text}`
+              : t('{id} (outside this snapshot)', { id: text })
           }
           if (text) {
             const value = node('dd', '', text)
             if (key === 'id') value.dataset.identityId = agent.id
-            fields.append(node('dt', '', label), value)
+            fields.append(node('dt', '', t(label)), value)
           }
         }
         section.append(header, fields)
@@ -85,7 +95,7 @@ $('identity-list').addEventListener('click', async (event) => {
   const id = button.dataset.copyId
   try {
     await navigator.clipboard.writeText(id)
-    $('copy-status').textContent = 'Agent ID copied.'
+    $('copy-status').textContent = t('Agent ID copied.')
   } catch {
     const value = Array.from($('identity-list').querySelectorAll('[data-identity-id]')).find(
       (item) => item.dataset.identityId === id
@@ -93,8 +103,9 @@ $('identity-list').addEventListener('click', async (event) => {
     if (value) {
       window.getSelection()?.selectAllChildren(value)
     }
-    $('copy-status').textContent =
+    $('copy-status').textContent = t(
       'Clipboard unavailable. Agent ID selected; copy it with your keyboard or context menu.'
+    )
   }
 })
 
@@ -130,30 +141,42 @@ export function renderActivityDetail(context) {
       const state = stateOf(segmentAt(lane(id)?.segments ?? [], at))
       if (state !== 'unknown') return stateLabel(state)
       missingState = true
-      return 'No observed state'
+      return t('No observed state')
     }
     const input = message.from === null
     const received = Number.isFinite(message.deliveredAt)
     const recipient = agentName(lane(message.to))
     const route = input
-      ? 'Received by ' + recipient
+      ? t('Received by {name}', { name: recipient })
       : agentName(lane(message.from)) + ' → ' + recipient
-    $('detail-heading').textContent = message.subject || message.type || 'Coordination message'
-    $('detail-meta').textContent = `${route} · ${message.type}`
+    $('detail-heading').textContent = message.subject || t(message.type || 'Coordination message')
+    $('detail-meta').textContent = [route, t(message.type)].filter(Boolean).join(' · ')
     const states = input
       ? [
-          `At retrieval (${eventTime.format(message.at)}) · Receiver: ${endpoint(message.to, message.at)}`
+          t('At retrieval ({time}) · Receiver: {state}', {
+            time: eventTime.format(message.at),
+            state: endpoint(message.to, message.at)
+          })
         ]
       : [
-          `At send (${eventTime.format(message.at)}) · Sender: ${endpoint(message.from, message.at)} · Receiver: ${endpoint(message.to, message.at)}`,
+          t('At send ({time}) · Sender: {from} · Receiver: {to}', {
+            time: eventTime.format(message.at),
+            from: endpoint(message.from, message.at),
+            to: endpoint(message.to, message.at)
+          }),
           received
-            ? `At retrieval (${eventTime.format(message.deliveredAt)}) · Receiver: ${endpoint(message.to, message.deliveredAt)}`
-            : 'Delivery not confirmed'
+            ? t('At retrieval ({time}) · Receiver: {state}', {
+                time: eventTime.format(message.deliveredAt),
+                state: endpoint(message.to, message.deliveredAt)
+              })
+            : t('Delivery not confirmed')
         ]
-    if (missingState) states.push('Execution state requires a separate recorder observation.')
+    if (missingState) states.push(t('Execution state requires a separate recorder observation.'))
     const body =
       message.body ||
-      (message.id.startsWith('public-') ? 'Only routing metadata is recorded.' : 'No message body.')
+      t(
+        message.id.startsWith('public-') ? 'Only routing metadata is recorded.' : 'No message body.'
+      )
     $('detail-body').textContent = [...states, body].join('\n')
     const relatedIds = new Set(selection.messages)
     const related = displayed.messages.filter((item) => relatedIds.has(item.id))
@@ -162,7 +185,7 @@ export function renderActivityDetail(context) {
         const button = node(
           'button',
           '',
-          `${eventTime.format(item.at)} · ${item.subject || item.type}`
+          `${eventTime.format(item.at)} · ${item.subject || t(item.type || 'Coordination message')}`
         )
         button.type = 'button'
         button.addEventListener('click', () => {
@@ -200,13 +223,16 @@ export function renderActivityDetail(context) {
     $('detail-heading').textContent = `${agentName(agent)} · ${stateLabel(state)}`
     $('detail-meta').textContent =
       `${eventTime.format(segment.start)} – ${eventTime.format(segment.end)} · ${duration(segment.end - segment.start)}`
-    $('detail-body').textContent = `Observed via ${segment.source || 'an unknown source'}.`
+    $('detail-body').textContent = t('Observed via {source}.', {
+      source: t(segment.source || 'an unknown source')
+    })
     if (state === 'unknown') {
       $('detail-body').textContent = unobservedDescription(agent, segment)
     }
     if (segment.joinedWork)
       $('detail-body').textContent +=
-        ' The timeline connects the working observations on either side of this short interval.'
+        ' ' +
+        t('The timeline connects the working observations on either side of this short interval.')
   }
 }
 
@@ -214,32 +240,46 @@ export function overlapsOmittedRange(agent, start, end) {
   return agent.omittedRanges?.some((range) => range.start < end && range.end > start)
 }
 
-export function activeAgents(snapshot, start, end) {
-  const participants = new Set(
-    snapshot.messages.flatMap((message) =>
-      message.at >= start && message.at <= end ? [message.from, message.to] : []
-    )
-  )
-  const query = $('search').value.trim().toLocaleLowerCase()
-  for (const agent of snapshot.agents) {
-    if (agent.parentId && agent.spawnedAt >= start && agent.spawnedAt <= end) {
-      participants.add(agent.id)
-      participants.add(agent.parentId)
+export function windowActivity(snapshot, start, end) {
+  const ids = new Set()
+  for (const message of snapshot.messages) {
+    if (message.at >= start && message.at <= end) {
+      ids.add(message.to)
+      if (message.from) ids.add(message.from)
     }
   }
+  for (const agent of snapshot.agents) {
+    if (Number.isFinite(agent.spawnedAt) && agent.spawnedAt >= start && agent.spawnedAt <= end) {
+      ids.add(agent.id)
+      if (agent.parentId) ids.add(agent.parentId)
+    }
+    if (
+      overlapsOmittedActivity(agent, start, end) ||
+      agent.stateEvents?.some(
+        (event) => isActiveState(event.state) && eventInWindow(event, start, end)
+      ) ||
+      agent.segments.some(
+        (segment) => isActiveState(segment.state) && segment.end > start && segment.start < end
+      )
+    )
+      ids.add(agent.id)
+  }
+  return ids
+}
+
+export function activeAgents(
+  snapshot,
+  start,
+  end,
+  pins = new Set(),
+  activity = windowActivity(snapshot, start, end)
+) {
+  const query = $('search').value.trim().toLocaleLowerCase(locale)
   return snapshot.agents.filter(
     (agent) =>
-      (participants.has(agent.id) ||
-        overlapsOmittedRange(agent, start, end) ||
-        (Number.isFinite(agent.spawnedAt) && agent.spawnedAt >= start && agent.spawnedAt <= end) ||
-        agent.segments.some((segment) =>
-          segment.state === 'done'
-            ? segment.start >= start && segment.start <= end
-            : (segment.joinedWork || ['working', 'blocked', 'waiting'].includes(segment.state)) &&
-              segment.end > start &&
-              segment.start < end
-        )) &&
+      (pins.has(terminalKey(agent)) || (!agent.pinnedShortTask && activity.has(agent.id))) &&
       [
+        agentName(agent),
         agent.label,
         agent.projectName,
         agent.workspace,
@@ -247,14 +287,14 @@ export function activeAgents(snapshot, start, end) {
         ...IDENTITY_FIELDS.map(([key]) => agent[key])
       ].some((value) =>
         String(value || '')
-          .toLocaleLowerCase()
+          .toLocaleLowerCase(locale)
           .includes(query)
       )
   )
 }
 
-export function visibleAgents(snapshot, start, end, compact = false) {
-  const agents = activeAgents(snapshot, start, end)
+export function visibleAgents(snapshot, start, end, compact = false, pins, activity) {
+  const agents = activeAgents(snapshot, start, end, pins, activity)
   const ids = new Set(agents.map((agent) => agent.id))
   const children = new Map()
   for (const agent of agents) {
@@ -284,7 +324,7 @@ export function visibleAgents(snapshot, start, end, compact = false) {
   }
   const groups = new Map()
   for (const agent of ordered) {
-    const key = agent.projectId || '__unknown__'
+    const key = projectKey(agent)
     if (!groups.has(key)) {
       groups.set(key, [])
     }
@@ -293,14 +333,12 @@ export function visibleAgents(snapshot, start, end, compact = false) {
   if (!groups.size) {
     return []
   }
-  const projectByAgent = new Map(
-    agents.map((agent) => [agent.id, agent.projectId || '__unknown__'])
-  )
+  const projectByAgent = new Map(agents.map((agent) => [agent.id, projectKey(agent)]))
   const weights = new Map()
   for (const message of snapshot.messages) {
     const from = projectByAgent.get(message.from)
     const to = projectByAgent.get(message.to)
-    if (!from || !to || from === to) {
+    if (from === undefined || to === undefined || from === to) {
       continue
     }
     for (const [a, b] of [

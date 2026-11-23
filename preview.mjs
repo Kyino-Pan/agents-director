@@ -9,6 +9,14 @@ export async function startPreview({ port = 0 } = {}) {
   const root = `/${randomUUID()}/`
   const assets = {
     '': ['panel.html', 'text/html; charset=utf-8'],
+    'orca-plugin.json': ['orca-plugin.json', 'application/json'],
+    'panel-i18n.mjs': ['panel-i18n.mjs', 'text/javascript'],
+    'pin-identity.mjs': ['pin-identity.mjs', 'text/javascript'],
+    'locales/fr.mjs': ['locales/fr.mjs', 'text/javascript'],
+    'locales/de.mjs': ['locales/de.mjs', 'text/javascript'],
+    'locales/ja.mjs': ['locales/ja.mjs', 'text/javascript'],
+    'locales/ko.mjs': ['locales/ko.mjs', 'text/javascript'],
+    'locales/zh.mjs': ['locales/zh.mjs', 'text/javascript'],
     'panel.css': ['panel.css', 'text/css; charset=utf-8'],
     'panel.mjs': ['panel.mjs', 'text/javascript; charset=utf-8'],
     'panel-inputs.mjs': ['panel-inputs.mjs', 'text/javascript; charset=utf-8'],
@@ -23,6 +31,8 @@ export async function startPreview({ port = 0 } = {}) {
     'lane-order.mjs': ['lane-order.mjs', 'text/javascript'],
     'lane-motion.mjs': ['lane-motion.mjs', 'text/javascript'],
     'timeline-evidence.mjs': ['timeline-evidence.mjs', 'text/javascript'],
+    'shared-preferences.mjs': ['shared-preferences.mjs', 'text/javascript'],
+    'panel.fixture.mjs': ['panel.fixture.mjs', 'text/javascript'],
     'view-preferences.mjs': ['view-preferences.mjs', 'text/javascript']
   }
   const themeSource = await readFile(new URL('./assets/preview-theme.css', import.meta.url), 'utf8')
@@ -110,12 +120,19 @@ export async function startPreview({ port = 0 } = {}) {
       }
       if (route === 'bridge.mjs') {
         response.setHeader('content-type', 'text/javascript; charset=utf-8')
-        response.end(`window.orca={locale:navigator.language,plugin:{request:async(name,input)=>{
+        response.end(`import {createSharedPreferences} from './shared-preferences.mjs';
+          import {fixturePreferences} from './panel.fixture.mjs';
+          const prefix='agent-activity:';
+          const storage={get: async key=>JSON.parse(localStorage.getItem(prefix+key)),set: async(key,value)=>{localStorage.setItem(prefix+key,JSON.stringify(value));if(key.startsWith('view:pinned-'))localStorage.setItem(prefix+'preview-pin-version',crypto.randomUUID())}};
+          const shared=()=>createSharedPreferences(storage,()=>{});
+          window.orca={locale:navigator.language,plugin:{request:async(name,input)=>{
+          if(name==='activity.changePreference')return navigator.locks.request(prefix+'pins',()=>shared().change(input));
           if(name==='activity.navigate')throw new Error('Open Agents Director inside Orca to navigate to a terminal.');
           if(name==='activity.inputs'){const r=await fetch('./inputs?agentId='+encodeURIComponent(input?.agentId||''));if(!r.ok)throw new Error('Inputs unavailable');return r.json();}
           if(name!=='activity.snapshot')throw new Error('Unknown preview request');
           const response=await fetch('./snapshot?hideShortTasks='+String(input?.hideShortTasks!==false));if(!response.ok)throw new Error('Collector unavailable');
-          return response.json();},on:()=>({dispose(){}})}};`)
+          const prefs=await shared().read(); return {...fixturePreferences(await response.json(),prefs),language:prefs.language,pinVersion:localStorage.getItem(prefix+'preview-pin-version')};},
+          on:(_event,fn)=>{const listener=()=>fn();window.addEventListener('storage',listener);return {dispose(){window.removeEventListener('storage',listener)}}}}};`)
         return
       }
       const asset = assets[route]

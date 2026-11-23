@@ -13,6 +13,17 @@ Settings → Plugins → Add plugin → From a Git URL. Open the Agents Director
 or create an Agents Director editor from the tab-bar + menu. New permissions must
 be approved in Orca before updating from 0.1.x.
 
+The desktop panel and custom editor read the version from their packaged
+`orca-plugin.json` and render their own translations. Version 1.4.260 documents
+`orca.locale` and relative package resources. Its command and contribution titles
+are literal manifest strings. The host’s language-pack contribution translates
+Orca’s own interface. The plugin keeps its brand and manifest fields in their
+declared form. The picker changes only Agents Director. Unknown host diagnostics,
+session names, project names and message contents retain their original text.
+[Desktop frame API and package resources](https://github.com/stablyai/orca/blob/3330a89fa30edfd154901546f368ab4d6329962c/docs/reference/plugin-authoring.md#files-and-assets)
+· [Manifest reference](https://github.com/stablyai/orca/blob/3330a89fa30edfd154901546f368ab4d6329962c/skill-guides/orca-plugin-authoring/references/manifest.md)
+· [Directory maintainers’ API requirements](https://github.com/Kyino-Pan/agents-director/issues/11)
+
 ## Timeline and controls
 
 Lanes use public session titles, harness labels and workspace/project membership.
@@ -32,7 +43,22 @@ session identity can show observed states, but cannot be resumed by this plugin.
 - Pause view freezes inspection while collection continues.
 - Hide short tasks filters only reliably finished executions below three minutes.
   Incomplete history remains visible. Session summaries alone never prove a short task.
-- Sort by recent activity or choose Shorter links to group related lanes.
+- **Group related lanes** places lanes with spawn or message connections closer together.
+  Switch it off to restore recent-activity order.
+- Select **Language** beside the live status to choose Chinese, Japanese, Korean,
+  English, French or German. **Follow Orca** uses the public frame locale and then the
+  browser’s language preferences if Orca has no valid locale. Regional tags preserve local
+  number and date formatting. An unsupported Orca language falls back to English. Panel and editor share the same language preference.
+- Hover over a project or terminal name to show its star. A pinned star stays visible. Tab to the star and press Enter
+  or Space to toggle it. Pinned projects lead the list. Pinned terminals lead their own
+  project and remain searchable in idle windows. An idle pinned project keeps just its
+  heading. Unpinning restores the usual window and short-task filters.
+- Only a saved pin on an individual matching terminal exempts it from **Hide short
+  tasks**. The lane details identify short executions shown this way. Pins reserve
+  places within the existing 160-lane snapshot limit. The recorder’s retention and
+  identity limits still apply. Project pins use host and project IDs. Terminal pins
+  use host, workspace, provider and session identity, with the exact recorded lane
+  ID as a fallback when there is no public session ID.
 - Right-click → Data sources shows collection errors, truncation and coverage.
 - Layout preferences use the plugin's own storage.
 
@@ -69,6 +95,18 @@ unknown identities wait for the next public inventory. An event arriving during 
 older inventory response wins for that terminal. Event state is not extended by
 merely reading a panel snapshot.
 
+An unpinned lane qualifies for the window through working, blocked or waiting
+observations (including observed activity omitted from the plot), a plotted message endpoint or a spawn. A window containing only Done or Unobserved stays hidden, even when the completion is known. The recorder identifies a completion at the first Done
+observation after a different observed execution state on that lane. If a gap separates
+these observations, both bounds of that change must fit in the view to establish a
+completion there. A new sample
+of an already completed terminal, including after a recorder restart, starts a
+fresh coverage interval without creating a new completion. A first-ever Done
+observation lacks that transition evidence. Individual observations can qualify at
+either window boundary even when their interval has zero width. This window rule is
+independent of the full-task execution measurement. Both operate on the snapshot
+and preserve the recorded points.
+
 Every state interval is bounded by observations. Missing terminals, failed reads,
 worker downtime and poll gaps over 15 seconds stop continuity; they never imply
 continued work or completion. Session `createdAt`, `updatedAt` and `running` are
@@ -85,8 +123,11 @@ The snapshot includes up to 160 lanes, 4,000 segments across those lanes and
 existing intervals covering both endpoints at the plotted message time, the
 receiver at retrieval, and each lane's latest interval. Sparse lanes keep
 their full history when it fits. Dense lanes share the budget and fill their
-remaining places with recent intervals. A window overlapping omitted intervals keeps
-the lane visible, even with no messages. “History limited” appears when such
+remaining places with recent intervals. For omitted segments, the worker retains the
+exact bounds of observed working, blocked or waiting time. Only windows overlapping
+those bounds qualify through omitted activity. The frame retrieves the affected
+rows’ omission metadata in a separate reply bound to that snapshot. Done intervals and gaps can still
+carry a clipping notice when another event or a pin keeps the lane visible. “History limited” appears when such
 a window contains no retained state interval. The recorder bounds
 points and messages at 5,000 each.
 

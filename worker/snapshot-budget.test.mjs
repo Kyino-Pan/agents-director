@@ -182,3 +182,81 @@ test('endpoint reservations can exceed a fair share without joining across an om
     4000
   )
 })
+
+test('retained pinned project headings page by UTF-8 size and stale partial results can be retried', async () => {
+  const { createHeadingPages } = await import('./project-headings.mjs')
+  const source = Array.from({ length: 1800 }, (_, n) => ({
+    hostId: 'local',
+    projectId: 'repo-' + n,
+    projectName: '全部短任务'.repeat(60) + n
+  }))
+  const pages = createHeadingPages()
+  const version = pages.update(source)
+  assert.ok(version)
+  assert.equal(pages.update(structuredClone(source)), version)
+  const restored = []
+  let index = 0
+  for (; ; index++) {
+    const page = pages.get({ version, index })
+    assert.ok(Buffer.byteLength(JSON.stringify(page)) < 129 * 1024)
+    restored.push(...page.headings)
+    if (!page.more) break
+  }
+  assert.ok(index > 1)
+  assert.deepEqual(restored, source)
+  assert.equal(pages.update([]), null)
+  assert.deepEqual(pages.get({ version, index: 0 }), { stale: true })
+})
+
+test('optional snapshot fields stay absent on lanes, headings, messages and nested metadata', () => {
+  const store = new ActivityStore(fixtureNow)
+  store.agent('legacy', { projectId: 'p', memory: { samples: [{ bytes: 0, metric: undefined }] } })
+  store.agent('other', { hostId: 'another-host', projectId: 'p' })
+  store.point('one', 'legacy', fixtureNow - 100, 'working', undefined, fixtureNow)
+  store.message({ id: 'mail', from: null, to: 'other', at: fixtureNow, deliveredAt: undefined })
+  store.source('test', 'limited', undefined)
+  const view = store.snapshot(fixtureNow, { pinnedProjects: [JSON.stringify(['', 'p'])] })
+  const lane = view.agents.find((a) => a.id === 'legacy')
+  assert.deepEqual(view.pinnedProjects, [{ projectId: 'p' }])
+  assert.equal(Object.hasOwn(lane, 'hostId'), false)
+  assert.equal(Object.hasOwn(lane, 'projectName'), false)
+  assert.deepEqual(lane.memory, { samples: [{ bytes: 0 }] })
+  assert.equal(Object.hasOwn(store.agents.get('legacy').memory.samples[0], 'metric'), true)
+  assert.equal(view.messages[0].from, null)
+  function check(value) {
+    assert.notEqual(value, undefined)
+    if (value !== null && typeof value === 'object') Object.values(value).forEach(check)
+  }
+  check(view)
+})
+
+test('clipped evidence is paired with the requesting frame and snapshot, including concurrent views', async () => {
+  const { createOmissionReplies } = await import('./snapshot-omissions.mjs')
+  const replies = createOmissionReplies()
+  const first = denseRecorder().snapshot(fixtureNow)
+  const other = { ...first, agents: [...first.agents].reverse() }
+  const older = replies.prepare(first, 'panel')
+  const sidebar = replies.prepare(first, 'panel')
+  const editor = replies.prepare(other, 'editor')
+  assert.deepEqual(replies.take('editor', sidebar.omissionToken), { stale: true })
+  assert.deepEqual(replies.take('panel', older.omissionToken), { stale: true })
+  const legacy = replies.prepare(first)
+  for (const [index, agent] of legacy.agents.entries()) {
+    assert.deepEqual(agent.omittedRanges, first.agents[index].omittedRanges)
+    assert.equal(agent.omittedActivity, undefined)
+  }
+  for (const [frame, part, full] of [
+    ['panel', sidebar, first],
+    ['editor', editor, other]
+  ]) {
+    const { rows } = replies.take(frame, part.omissionToken)
+    assert.ok(rows.length > 0)
+    const restored = [...part.agents]
+    for (const { index, ...metadata } of rows) {
+      assert.equal(restored[index].omittedRanges, undefined)
+      restored[index] = { ...restored[index], ...metadata }
+    }
+    assert.deepEqual(restored, full.agents)
+    assert.deepEqual(replies.take(frame, part.omissionToken), { stale: true })
+  }
+})

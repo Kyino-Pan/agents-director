@@ -1,3 +1,6 @@
+import { createOmissionReplies } from './snapshot-omissions.mjs'
+import { createHeadingPages } from './project-headings.mjs'
+import { createSharedPreferences } from '../shared-preferences.mjs'
 import { ActivityStore } from './activity-store.mjs'
 import { PublicCollector } from './public-collector.mjs'
 import { createPublicNavigator } from './public-navigation.mjs'
@@ -15,6 +18,11 @@ let stop
 
 export default function activate(orca) {
   const store = new ActivityStore()
+  const omissions = createOmissionReplies()
+  const headings = createHeadingPages()
+  const shared = createSharedPreferences(orca.storage, () =>
+    orca.panels.post('activity.changed', { preferences: true })
+  )
   const collector = new PublicCollector(store, orca.host)
   const navigate = createPublicNavigator(store, orca.host)
   let closing = false
@@ -128,13 +136,28 @@ export default function activate(orca) {
     return scanning
   }
   let ready
-  orca.panels.handle('activity.snapshot', async (input) => {
+  orca.panels.handle('activity.snapshot', async (input, context) => {
     await ready
-    return store.snapshot(Date.now(), {
+    const prefs = await shared.read()
+    const { pinnedProjects, ...snapshot } = store.snapshot(Date.now(), {
       hideShortTasks: input?.hideShortTasks !== false,
+      pinnedTerminals: prefs.pinnedTerminals,
+      pinnedProjects: prefs.pinnedProjects,
       attempts: collector.relations.attempts()
     })
+    return {
+      ...omissions.prepare(snapshot, input?.withOmittedActivity && context?.panel.id),
+      headingVersion: headings.update(pinnedProjects),
+      language: prefs.language,
+      pinVersion: prefs.pinVersion,
+      preferencesUnavailable: prefs.preferencesUnavailable ?? false
+    }
   })
+  orca.panels.handle('activity.omittedActivity', (input, context) =>
+    omissions.take(context.panel.id, input?.token)
+  )
+  orca.panels.handle('activity.projectHeadings', (input) => headings.get(input))
+  orca.panels.handle('activity.changePreference', (input) => shared.change(input))
   orca.panels.handle('activity.inputs', async (input) => ({
     agentId: input?.agentId,
     inputs: [],

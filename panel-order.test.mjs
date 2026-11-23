@@ -9,14 +9,20 @@ for (const [width, dark] of [
   [1100, false],
   [390, true]
 ]) {
-  test(`shorter-links toggle preserves identities and restores activity order at ${width}px`, async () => {
+  test(`related-lane toggle preserves identities and restores activity order at ${width}px`, async () => {
     const data = structuredClone(snapshot)
     data.agents = ['a', 'b', 'c', 'd'].map((id, i) => ({
       id,
       label: `Agent ${id}`,
       projectId: 'p',
       projectName: 'Project',
-      segments: [{ start: data.now - (i + 1) * 1000, end: data.now, state: 'done' }]
+      segments: [
+        {
+          start: data.now - (i + 1) * 1000,
+          end: data.now,
+          state: 'working'
+        }
+      ]
     }))
     data.agents[1].parentId = 'd'
     data.agents[1].spawnedAt = data.now - 3600000
@@ -29,7 +35,7 @@ for (const [width, dark] of [
         page
           .locator('.lane')
           .evaluateAll((elements) => elements.map((element) => element.dataset.agent))
-      const toggle = page.getByRole('button', { name: 'Shorter links', exact: true })
+      const toggle = page.getByRole('button', { name: 'Group related lanes', exact: true })
       const lineLength = () =>
         page
           .locator('.spawn, .message-path')
@@ -80,7 +86,13 @@ test('reorder motion keeps lanes, activity and connector endpoints aligned, incl
     label: `Agent ${id}`,
     projectId: 'p',
     projectName: 'Project',
-    segments: [{ start: data.now - (i + 1) * 1000, end: data.now, state: 'done' }]
+    segments: [
+      {
+        start: data.now - (i + 1) * 1000,
+        end: data.now,
+        state: 'working'
+      }
+    ]
   }))
   data.agents[1].parentId = 'd'
   data.agents[1].spawnedAt = data.now - 3600000
@@ -141,7 +153,7 @@ test('reorder motion keeps lanes, activity and connector endpoints aligned, incl
     }
     assert.ok(Math.abs(transition.child - transition.b) < 0.1)
     await page.emulateMedia({ reducedMotion: 'reduce' })
-    await page.getByRole('button', { name: 'Shorter links' }).click()
+    await page.getByRole('button', { name: 'Group related lanes' }).click()
     assert.equal(await page.evaluate(() => document.getAnimations().length), 0)
     assert.deepEqual(await page.locator('.lane-name').allTextContents(), [
       'Agent a',

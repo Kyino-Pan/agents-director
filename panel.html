@@ -10,8 +10,22 @@
     <main class="activity">
       <header class="header">
         <div class="heading">
-          <h1>Agents Director</h1>
-          <span id="live-status" class="live">Connecting</span>
+          <h1>Agents Director <span id="plugin-version"></span></h1>
+          <div class="status-tools">
+            <span id="live-status" class="live">Connecting</span>
+            <label class="language-control"
+              ><span>Language</span>
+              <select id="language">
+                <option value="auto">Follow Orca</option>
+                <option value="zh" lang="zh">中文</option>
+                <option value="ja" lang="ja">日本語</option>
+                <option value="ko" lang="ko">한국어</option>
+                <option value="en" lang="en">English</option>
+                <option value="fr" lang="fr">Français</option>
+                <option value="de" lang="de">Deutsch</option>
+              </select>
+            </label>
+          </div>
         </div>
         <div class="toolbar">
           <label class="search"
@@ -22,7 +36,14 @@
               placeholder="Find name, ID or workspace…"
               autocomplete="off"
           /></label>
-          <button type="button" id="shorten-links" aria-pressed="false">Shorter links</button>
+          <button
+            type="button"
+            id="shorten-links"
+            title="Place lanes connected by messages or spawns closer together."
+            aria-pressed="false"
+          >
+            Group related lanes
+          </button>
           <button
             type="button"
             id="hide-short-tasks"
@@ -60,6 +81,7 @@
         </div>
       </header>
       <div id="navigation-status" class="notice" role="status" hidden></div>
+      <div id="preference-error" class="notice" role="status" hidden></div>
       <div id="failure" class="failure" role="alert" hidden>
         <span id="failure-text"></span><button type="button" id="retry">Retry</button>
       </div>

@@ -78,15 +78,22 @@ summary:focus-visible,
 .heading {
   display: flex;
   align-items: center;
-  gap: 12px;
-  justify-content: space-between;
-  margin-bottom: 16px;
+  gap: 4px 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 h1,
 h2 {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
+}
+.heading h1 {
+  font-size: 12px;
+}
+#plugin-version {
+  font-weight: 400;
+  color: var(--orca-muted-foreground);
 }
 .live {
   display: inline-flex;
@@ -756,6 +763,10 @@ input::placeholder {
   background: var(--orca-popover, var(--orca-background));
 }
 #activity-menu button {
+  height: auto;
+  min-height: 30px;
+  white-space: normal;
+  overflow-wrap: anywhere;
   display: block;
   width: 100%;
   border: 0;
@@ -824,4 +835,66 @@ input::placeholder {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   user-select: text;
+}
+
+.status-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.language-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--orca-muted-foreground);
+  font-size: 11px;
+}
+.language-control select {
+  max-width: 125px;
+  min-height: 24px;
+  font: inherit;
+  color: var(--orca-foreground);
+  background: var(--orca-background);
+  border: 1px solid var(--orca-border);
+  border-radius: var(--control-radius);
+}
+.lane-row,
+.project-row {
+  position: relative;
+}
+.project-heading {
+  padding-right: 24px;
+}
+.lane-heading {
+  padding-right: 12px;
+}
+.pin-control {
+  position: absolute;
+  right: 1px;
+  top: 0;
+  height: 18px;
+  width: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--orca-muted-foreground);
+  font-size: 14px;
+  line-height: 1;
+}
+.project-row .pin-control {
+  top: 6px;
+}
+.pin-control[aria-pressed='false'] {
+  opacity: 0;
+}
+:is(.lane-row, .project-row):hover > .pin-control,
+.pin-control:focus-visible {
+  opacity: 1;
+}
+.pin-control::before {
+  content: '☆';
+}
+.pin-control[aria-pressed='true']::before {
+  content: '★';
 }

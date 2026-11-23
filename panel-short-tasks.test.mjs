@@ -44,7 +44,7 @@ for (const [width, dark] of [
         /short \(outside this snapshot\)/
       )
       await page.getByRole('button', { name: 'Close', exact: true }).click()
-      await page.getByRole('button', { name: 'Shorter links' }).click()
+      await page.getByRole('button', { name: 'Group related lanes' }).click()
       await page.getByRole('slider', { name: 'Window' }).focus()
       await page.keyboard.press('Home')
       await page.getByRole('searchbox').fill('task')

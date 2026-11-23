@@ -726,8 +726,7 @@ test('only agents with evidence in the selected time window are visible', async 
   assert.deepEqual(await page.locator('.lane-name').allTextContents(), [
     'Agent current-work',
     'Agent message-only',
-    'Agent old-work',
-    'Agent old-done'
+    'Agent old-work'
   ])
   assert.equal(
     await page.locator('[data-agent="message-only"] .lane-state').textContent(),
@@ -953,7 +952,11 @@ for (const [surface, width, height] of [
         assert.equal(await bars.count(), messages === 1 ? 1 : 0)
         assert.match(
           await page.locator('#summary').textContent(),
-          new RegExp('· ' + messages + ' coordination messages$')
+          new RegExp(
+            '· ' +
+              messages +
+              (messages === 1 ? ' coordination message$' : ' coordination messages$')
+          )
         )
         await lane.click()
         assert.equal(await page.locator('#detail-meta').textContent(), label)
@@ -985,9 +988,10 @@ for (const [surface, width, height] of [
       ]) {
         await setDenseWindow(page, from, '14:03')
         assert.ok((await bars.count()) > 0)
-        assert.equal(await lane.locator('.lane-state').textContent(), 'Last: Working')
+        // The retained Working → Done observation is exactly at the right boundary.
+        assert.equal(await lane.locator('.lane-state').textContent(), 'Done')
         await lane.click()
-        assert.equal(await page.locator('#detail-meta').textContent(), 'Last: Working')
+        assert.equal(await page.locator('#detail-meta').textContent(), 'Done')
         assert.equal(
           (await page.locator('#detail-body').textContent()).includes('omitted'),
           overlaps
