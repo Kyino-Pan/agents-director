@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { test } from 'node:test'
 import { startPreview } from './preview.mjs'
 import { snapshot } from './panel.fixture.mjs'
+import { denseRecorder, fixtureNow } from './worker/snapshot-budget.fixture.mjs'
 import { browser, pageFor } from './panel-test-browser.mjs'
 
 test('timeline filters, range, keyboard inspection and literal message text', async () => {
@@ -626,7 +627,10 @@ test('only agents with evidence in the selected time window are visible', async 
     agent('old-done', [{ start: now - 50 * hour, end: now, state: 'done' }]),
     agent('unobserved', [{ start: now - hour, end: now, state: 'unknown' }]),
     agent('current-work', [{ start: now - 2 * hour, end: now, state: 'working' }]),
-    agent('message-only', [{ start: now - hour, end: now, state: 'unknown' }])
+    agent('message-only', [
+      { start: now - 32 * hour, end: now - 31 * hour, state: 'waiting' },
+      { start: now - hour, end: now, state: 'unknown' }
+    ])
   ]
   data.messages = [
     { ...data.messages[0], from: 'message-only', to: 'current-work', at: now - hour }
@@ -636,6 +640,10 @@ test('only agents with evidence in the selected time window are visible', async 
     'Agent current-work',
     'Agent message-only'
   ])
+  assert.deepEqual(await page.locator('.lane-state').allTextContents(), [
+    'Working',
+    'Messages only'
+  ])
   await page.getByRole('slider', { name: 'Window' }).focus()
   await page.keyboard.press('End')
   assert.deepEqual(await page.locator('.lane-name').allTextContents(), [
@@ -644,6 +652,10 @@ test('only agents with evidence in the selected time window are visible', async 
     'Agent old-work',
     'Agent old-done'
   ])
+  assert.equal(
+    await page.locator('[data-agent="message-only"] .lane-state').textContent(),
+    'Last: Waiting'
+  )
   await page.keyboard.press('Home')
   assert.deepEqual(await page.locator('.lane-name').allTextContents(), ['Agent current-work'])
   assert.deepEqual(errors, [])
@@ -791,3 +803,120 @@ test('message groups update their statuses and selection as transient attempts s
     await page.close()
   }
 })
+
+test('dense history shows window-local evidence on lanes and in details', async () => {
+  const data = denseRecorder().snapshot(fixtureNow)
+  const { page, errors } = await pageFor({
+    data,
+    preferences: new Map([['view:window-hours', 1 / 12]])
+  })
+  try {
+    const lane = (id) => page.locator(`.lane[data-agent="${id}"]`)
+    for (const [id, label] of [
+      ['Reviewer', 'Last: Working'],
+      ['Worker', 'Last: Done'],
+      ['Coordinator', 'Last: Done'],
+      ['Mailbox', 'Messages only']
+    ]) {
+      assert.equal(await lane(id).locator('.lane-state').textContent(), label)
+      await lane(id).click()
+      assert.equal(await page.locator('#detail-meta').textContent(), label)
+      await page.keyboard.press('Escape')
+    }
+    assert.equal(await page.locator('.segment-target[data-agent="Mailbox"]').count(), 0)
+    assert.equal(await page.locator('.mailbox-input').count(), 1)
+    assert.equal(
+      await page.locator('.message-target[data-from="Reviewer"][data-to="Coordinator"]').count(),
+      1
+    )
+
+    assert.deepEqual(errors, [])
+  } finally {
+    await page.close()
+  }
+})
+
+for (const [surface, width, height] of [
+  ['panel', 600, 995],
+  ['editor', 920, 600]
+]) {
+  test(`omitted intervals intersect the selected window on the ${surface} layout`, async () => {
+    const recorder = denseRecorder()
+    recorder.message({
+      id: 'archived-send',
+      from: 'Reviewer',
+      to: 'Coordinator',
+      at: fixtureNow - 6 * 3600000,
+      type: 'Send accepted'
+    })
+    const { page, errors } = await pageFor({ width, height, data: recorder.snapshot(fixtureNow) })
+    const lane = page.locator('.lane[data-agent="Coordinator"]')
+    const bars = page.locator('.segment-target[data-agent="Coordinator"]')
+    async function setWindow(from, to) {
+      await page.evaluate(
+        ([from, to]) => {
+          const start = document.getElementById('range-start')
+          const end = document.getElementById('range-end')
+          start.value = '2026-11-02T' + from
+          end.value = '2026-11-02T' + to
+          end.dispatchEvent(new Event('change'))
+        },
+        [from, to]
+      )
+    }
+    try {
+      for (const [from, to, label, messages] of [
+        ['07:58', '08:03', 'Messages only', 3],
+        ['09:58', '10:03', 'History limited', 1],
+        ['10:10', '10:15', 'History limited', 0]
+      ]) {
+        await setWindow(from, to)
+        assert.equal(await lane.locator('.lane-state').textContent(), label)
+        assert.equal(await bars.count(), 0)
+        assert.match(
+          await page.locator('#summary').textContent(),
+          new RegExp('· ' + messages + ' coordination messages$')
+        )
+        await lane.click()
+        assert.equal(await page.locator('#detail-meta').textContent(), label)
+        const detail = await page.locator('#detail-body').textContent()
+        if (messages === 3) {
+          assert.match(detail, /Coordination messages/)
+          assert.doesNotMatch(detail, /omitted/)
+        } else {
+          assert.match(detail, /omitted 555 earlier segments/)
+        }
+        if (process.env.ACTIVITY_SCREENSHOTS) {
+          await mkdir(process.env.ACTIVITY_SCREENSHOTS, { recursive: true })
+          await page.screenshot({
+            animations: 'disabled',
+            path: `${process.env.ACTIVITY_SCREENSHOTS}/${surface}-${from.replace(':', '')}.png`
+          })
+        }
+        await page.keyboard.press('Escape')
+      }
+      // The omitted range is [09:20:00, 13:57:30). Touching either endpoint
+      // has zero overlap. One second inside the range is enough.
+      await setWindow('09:15', '09:20')
+      assert.equal(await lane.count(), 0)
+      await setWindow('09:15:01', '09:20:01')
+      assert.equal(await lane.locator('.lane-state').textContent(), 'History limited')
+      for (const [from, overlaps] of [
+        ['13:57:29', true],
+        ['13:57:30', false]
+      ]) {
+        await setWindow(from, '14:03')
+        assert.ok((await bars.count()) > 0)
+        await lane.click()
+        assert.equal(
+          (await page.locator('#detail-body').textContent()).includes('omitted'),
+          overlaps
+        )
+        await page.keyboard.press('Escape')
+      }
+      assert.deepEqual(errors, [])
+    } finally {
+      await page.close()
+    }
+  })
+}

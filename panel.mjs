@@ -1,5 +1,11 @@
 import { DetailInputs } from './panel-inputs.mjs'
-import { activeAgents, agentName, renderActivityDetail, visibleAgents } from './panel-identity.mjs'
+import {
+  activeAgents,
+  agentName,
+  overlapsOmittedRange,
+  renderActivityDetail,
+  visibleAgents
+} from './panel-identity.mjs'
 import { harnessIcon, harnessLabel, shortAgentId } from './panel-harness.mjs'
 import { installActivityActions, renderSources } from './panel-actions.mjs'
 import { createLaneMotion, spawnPath, messagePath } from './lane-motion.mjs'
@@ -44,6 +50,7 @@ let renderedWidth = 0
 let renderedHeight = 0
 let renderedZoomWidth = 0
 let renderedAgents = []
+const laneEvidence = new Map()
 let gestureAgents = null
 let gestureTimer
 const laneMotion = createLaneMotion($('lanes'), $('chart'))
@@ -123,6 +130,29 @@ function unobservedDescription(agent, segment) {
   return `No reliable state observation covers this interval. Missing or stale logs cannot confirm continued work.${previous ? `\nLast observed: ${stateLabel(stateOf(previous))} through ${dateFormat.format(previous.end)}.` : '\nNo earlier state observation is available in this snapshot.'}`
 }
 
+function evidenceInWindow(agent, start, end, hasMessages) {
+  const last = agent.segments.findLast(
+    (item) => item.end > start && item.start < end && stateOf(item) !== 'unknown'
+  )
+  const limited = overlapsOmittedRange(agent, start, end)
+  let label = 'Unobserved'
+  let detail = 'No state interval is available in this window.'
+  if (last) {
+    const state = stateLabel(last.state)
+    label = last.end >= end ? state : `Last: ${state}`
+    detail = `${state} observed through ${dateFormat.format(Math.min(last.end, end))} in this window.`
+  } else if (limited) {
+    label = 'History limited'
+  } else if (hasMessages) {
+    label = 'Messages only'
+    detail =
+      'Coordination messages are recorded in this window. No execution state interval is available here.'
+  }
+  if (limited)
+    detail += ` This window overlaps the range where the snapshot omitted ${agent.omittedSegments} earlier segments on this lane.`
+  return { state: stateOf(last), label, detail }
+}
+
 function duration(ms) {
   if (ms < 60_000) {
     return '< 1 min'
@@ -194,12 +224,12 @@ function render() {
   if (document.activeElement !== $('range-end')) {
     $('range-end').value = localDate(end)
   }
-  const messages = snapshot.messages.filter(
-    (message) =>
-      message.at >= start &&
-      message.at <= end &&
-      (message.from === null || rowById.has(message.from)) &&
-      rowById.has(message.to)
+  const windowMessages = snapshot.messages.filter(
+    (message) => message.at >= start && message.at <= end
+  )
+  const participants = new Set(windowMessages.flatMap((message) => [message.from, message.to]))
+  const messages = windowMessages.filter(
+    (message) => (message.from === null || rowById.has(message.from)) && rowById.has(message.to)
   )
   if (selection?.agent && !rowById.has(selection.agent)) selection = null
   if (selection?.message) {
@@ -238,6 +268,7 @@ function render() {
   const x = (at) => padding + ((at - start) / Math.max(1, end - start)) * (width - padding * 2)
   const center = (id) => positions.get(id)
   const labels = []
+  laneEvidence.clear()
   let lastProject
   for (const agent of agents) {
     const project = agent.projectId || '__unknown__'
@@ -249,12 +280,13 @@ function render() {
     lane.type = 'button'
     lane.dataset.key = `agent:${agent.id}`
     lane.dataset.agent = agent.id
-    const last = agent.segments.findLast((segment) => segment.start <= end)
-    const state = stateOf(last)
+    const evidence = evidenceInWindow(agent, start, end, participants.has(agent.id))
+    laneEvidence.set(agent.id, evidence)
     const label = agentName(agent)
     const identity = `${harnessLabel(agent)} · ${shortAgentId(agent)}`
-    lane.setAttribute('aria-label', `${label}: ${stateLabel(state)}. ${identity}. Inspect agent`)
-    const status = node('span', `lane-state ${state}`, stateLabel(state))
+    lane.setAttribute('aria-label', `${label}: ${evidence.label}. ${identity}. Inspect agent`)
+    const status = node('span', `lane-state ${evidence.state}`, evidence.label)
+    status.title = evidence.detail
     const meta = node('span', 'lane-meta')
     meta.append(status, node('span', 'lane-identity', shortAgentId(agent)))
     const heading = node('span', 'lane-heading')
@@ -518,6 +550,7 @@ function renderDetail() {
     dateFormat,
     stateOf,
     stateLabel,
+    laneEvidence,
     duration,
     unobservedDescription
   })

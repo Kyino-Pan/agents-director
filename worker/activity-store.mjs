@@ -490,14 +490,23 @@ export class ActivityStore {
       .sort((a, b) => a.label.localeCompare(b.label))
     let limited = this.limited || agents.length > 160
     let budget = 4000
-    const visible = agents.slice(0, 160).map((agent) => {
-      if (agent.segments.length > budget) {
+    const visible = agents.slice(0, 160)
+    // Satisfy small lanes first and divide the remaining space among dense ones.
+    // This allocation order does not change the lane order returned to the panel.
+    const bySize = [...visible].sort((a, b) => a.segments.length - b.segments.length)
+    for (const [index, agent] of bySize.entries()) {
+      const count = Math.min(agent.segments.length, Math.floor(budget / (bySize.length - index)))
+      budget -= count
+      if (count < agent.segments.length) {
         limited = true
+        agent.omittedSegments = agent.segments.length - count
+        agent.omittedRange = {
+          start: agent.segments[0].start,
+          end: agent.segments[agent.omittedSegments - 1].end
+        }
+        agent.segments = agent.segments.slice(agent.omittedSegments)
       }
-      const segments = budget > 0 ? agent.segments.slice(-budget) : []
-      budget -= segments.length
-      return { ...agent, segments }
-    })
+    }
     const ids = new Set(visible.map((agent) => agent.id))
     const messages = [...this.messages.values(), ...attempts]
       .filter(
