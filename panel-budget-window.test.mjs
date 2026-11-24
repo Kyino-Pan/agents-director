@@ -319,8 +319,9 @@ test('each gesture frame moves retained observations before a delayed viewport r
           ]) {
             total += delta
             chart.dispatchEvent(new WheelEvent('wheel', { deltaX: delta, cancelable: true }))
-            await new Promise(requestAnimationFrame)
-            await new Promise(requestAnimationFrame)
+            // Two 60 Hz drawing opportunities also cover a 120+ Hz browser.
+            const sent = performance.now()
+            while (performance.now() - sent < 1000 / 30) await new Promise(requestAnimationFrame)
             frames.push({ x: marker(), delta: total, width })
           }
           window.gestureComplete = true
