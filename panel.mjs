@@ -19,6 +19,7 @@ import { harnessIcon, harnessLabel, shortAgentId } from './panel-harness.mjs'
 import { installActivityActions, renderSources } from './panel-actions.mjs'
 import { createLaneMotion, spawnPath, messagePath } from './lane-motion.mjs'
 import { loadViewPreferences } from './view-preferences.mjs'
+import { viewWindow } from './view-window.mjs'
 
 const HOUR = 3_600_000
 const ROW = 32
@@ -90,6 +91,30 @@ if (updateLocale(preferences.language)) localizeDocument()
 let hours = preferences.hours
 let viewEnd = null
 let paused = false
+let pausedAt = null
+let viewRevision = 0
+let displayedViewRevision = -1
+let viewTimer = null
+let lastViewRequest = -Infinity
+const requestedView = () => ({ hours: preferences.hours, end: viewEnd ?? pausedAt })
+function refreshView(defer = false) {
+  viewRevision++
+  if (!defer) {
+    clearTimeout(viewTimer)
+    viewTimer = null
+    void refresh()
+  } else if (viewTimer === null) {
+    // Trackpad and slider input can exceed the host's message rate. Coalesce
+    // them while reading the latest desired viewport when the timer fires.
+    viewTimer = setTimeout(
+      () => {
+        viewTimer = null
+        void refresh()
+      },
+      Math.max(0, 250 - (performance.now() - lastViewRequest))
+    )
+  }
+}
 let pending = false
 let rerun = false
 let selection = null
@@ -314,11 +339,10 @@ function render() {
   renderZoom(snapshot)
   $('hide-short-tasks').setAttribute('aria-pressed', String(preferences.hideShortTasks))
   $('shorten-links').setAttribute('aria-pressed', String(preferences.compactLanes))
-  const end = Math.min(
-    snapshot.now,
-    Math.max(snapshot.windowStart + hours * HOUR, viewEnd ?? snapshot.now)
-  )
-  const start = Math.max(snapshot.windowStart, end - hours * HOUR)
+  const { start, end } = viewWindow(snapshot.now, snapshot.windowStart, requestedView())
+  // Keep the last complete plot while a new viewport is in flight. A cropped
+  // response for the previous viewport cannot describe the requested one.
+  if (snapshot.view && (snapshot.view.start !== start || snapshot.view.end !== end)) return
   const inWindow = (segment) => segment.end > start && segment.start < end
   const pins = new Set(snapshot.agents.filter((agent) => agent.pinned).map(terminalKey))
   const activity = windowActivity(snapshot, start, end)
@@ -850,22 +874,30 @@ async function refresh() {
   if (disposed) {
     return
   }
+  if (viewTimer !== null) {
+    rerun = true
+    return
+  }
   if (pending) {
     rerun = true
     return
   }
   pending = true
+  lastViewRequest = performance.now()
   $('retry').disabled = true
+  const hideShortTasks = preferences.hideShortTasks
+  const revision = viewRevision
+  const stale = () => revision !== viewRevision || hideShortTasks !== preferences.hideShortTasks
   try {
     if (!window.orca?.plugin?.request) {
       throw new Error('Open this panel in Orca with the Agents Director plugin enabled.')
     }
-    const hideShortTasks = preferences.hideShortTasks
     let snapshot = await window.orca.plugin.request('activity.snapshot', {
       hideShortTasks,
-      withOmittedActivity: true
+      withOmittedActivity: true,
+      view: requestedView()
     })
-    if (hideShortTasks !== preferences.hideShortTasks) {
+    if (stale()) {
       rerun = true
       return
     }
@@ -915,6 +947,11 @@ async function refresh() {
       }
       snapshot = { ...snapshot, pinnedProjects }
     }
+    if (disposed) return
+    if (stale()) {
+      rerun = true
+      return
+    }
     if (snapshot.language && !snapshot.preferencesUnavailable)
       preferences.language = snapshot.language
     $('language').value = preferences.language
@@ -927,18 +964,29 @@ async function refresh() {
     latest = snapshot
     $('failure').hidden = true
     showViewStatus()
-    if (!paused || !displayed || displayedHideShortTasks !== hideShortTasks) {
+    if (
+      !paused ||
+      !displayed ||
+      displayedHideShortTasks !== hideShortTasks ||
+      displayedViewRevision !== revision
+    ) {
       displayedHideShortTasks = hideShortTasks
+      displayedViewRevision = revision
       displayed = latest
       render()
     } else if (
       displayed.pinVersion !== latest.pinVersion ||
       displayed.headingVersion !== latest.headingVersion
     ) {
-      displayed = { ...latest, now: displayed.now, windowStart: displayed.windowStart }
+      displayed = latest
       render()
     } else if (localeChanged) render()
   } catch (error) {
+    if (disposed) return
+    if (stale()) {
+      rerun = true
+      return
+    }
     if (updateLocale(preferences.language)) {
       localizeDocument()
       render()
@@ -948,7 +996,7 @@ async function refresh() {
   } finally {
     pending = false
     $('retry').disabled = false
-    if (rerun && !disposed) {
+    if (rerun && !disposed && viewTimer === null) {
       rerun = false
       void refresh()
     }
@@ -1028,6 +1076,7 @@ for (const value of [1 / 4, 1, 6, 24, 168]) {
   tick.addEventListener('click', () => {
     preferences.set({ hours: Math.max(minHours, Math.min(value, maxHours)) })
     render()
+    refreshView()
   })
   $('zoom-ticks').append(tick)
 }
@@ -1041,13 +1090,14 @@ $('zoom').addEventListener('input', () => {
         : minHours * (maxHours / minHours) ** fraction
   preferences.set({ hours }, true)
   render()
+  refreshView(true)
 })
 $('zoom').addEventListener('change', preferences.flush)
-function setRange(start, end) {
+function setRange(start, end, defer = false) {
   if (!displayed || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
     return
   }
-  end = Math.min(displayed.now, end)
+  end = Math.min(pausedAt ?? displayed.now, end)
   start = Math.max(displayed.windowStart, start)
   if (end <= start) {
     return
@@ -1056,6 +1106,7 @@ function setRange(start, end) {
   preferences.set({ hours }, true)
   viewEnd = end >= displayed.now ? null : end
   render()
+  refreshView(defer)
 }
 for (const id of ['range-start', 'range-end']) {
   $(id).addEventListener('change', () =>
@@ -1091,24 +1142,25 @@ $('chart-scroll').addEventListener(
     }
     event.preventDefault()
     holdLanesDuringGesture()
-    const end = viewEnd ?? displayed.now
+    const end = viewEnd ?? pausedAt ?? displayed.now
     if (event.ctrlKey || event.metaKey) {
       const delta = Math.max(-100, Math.min(100, event.deltaY))
       const next = Math.max(minHours, Math.min(maxHours, hours * Math.exp(delta * 0.0015)))
-      setRange(end - next * HOUR, end)
+      setRange(end - next * HOUR, end, true)
     } else {
       const delta = ((event.deltaX || event.deltaY) * hours * HOUR) / 600
       const boundedEnd = Math.min(
-        displayed.now,
+        pausedAt ?? displayed.now,
         Math.max(displayed.windowStart + hours * HOUR, end + delta)
       )
-      setRange(boundedEnd - hours * HOUR, boundedEnd)
+      setRange(boundedEnd - hours * HOUR, boundedEnd, true)
     }
   },
   { passive: false }
 )
 $('pause').addEventListener('click', () => {
   paused = !paused
+  pausedAt = paused ? (displayed?.now ?? null) : null
   $('pause').textContent = t(paused ? 'Resume live' : 'Pause view')
   $('pause').setAttribute('aria-pressed', String(paused))
   if (!paused && latest) {
@@ -1118,6 +1170,7 @@ $('pause').addEventListener('click', () => {
     showViewStatus()
   }
   render()
+  refreshView()
 })
 $('lanes').addEventListener('click', (event) => {
   const button = event.target.closest('[data-pin]')
@@ -1191,6 +1244,7 @@ window.addEventListener(
     disposed = true
     window.clearInterval(timer)
     clearTimeout(gestureTimer)
+    clearTimeout(viewTimer)
     resize.disconnect()
     cancelAnimationFrame(resizeFrame)
     laneMotion.dispose()

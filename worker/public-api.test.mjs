@@ -6,6 +6,8 @@ import { ActivityStore, WINDOW_MS } from './activity-store.mjs'
 import { PublicCollector } from './public-collector.mjs'
 import { createPublicNavigator } from './public-navigation.mjs'
 import activate, { deactivate, STORAGE_PREFIX } from './main.mjs'
+import { encodeRecorderCache } from './recorder-cache.mjs'
+import { denseRecorder, fixtureNow } from './snapshot-budget.fixture.mjs'
 
 const NOW = 1_800_000_000_000
 const workspace = {
@@ -414,6 +416,51 @@ function workerFixture() {
   f.sessions = [{ ...saved, createdAt: Date.now() - 60000, updatedAt: Date.now() }]
   return f
 }
+
+test('worker requests budget each frame independently while legacy requests retain seven days', async () => {
+  const f = workerFixture()
+  const now = Date.now()
+  const raw = denseRecorder().serialize()
+  const offset = now - fixtureNow
+  for (const point of raw.points) {
+    point.at += offset
+    if (Number.isFinite(point.until)) point.until += offset
+  }
+  for (const mail of raw.messages) mail.at += offset
+  raw.collectingSince += offset
+  raw.collectedUntil = now
+  const chunks = encodeRecorderCache(raw)
+  f.storage.clear()
+  chunks.forEach((chunk, index) => f.storage.set(`${STORAGE_PREFIX}:a:${index}`, chunk))
+  f.storage.set(`${STORAGE_PREFIX}:head`, { version: 2, generation: 'a', chunks: chunks.length })
+  activate(f.api)
+  try {
+    const handler = f.handlers.get('activity.snapshot')
+    const [side, editor] = await Promise.all([
+      handler(
+        { hideShortTasks: false, view: { hours: 1 / 12, end: now } },
+        { panel: { id: 'side' } }
+      ),
+      handler(
+        { hideShortTasks: false, view: { hours: 1, end: now - 3600000 } },
+        { panel: { id: 'editor' } }
+      )
+    ])
+    assert.deepEqual(side.view, { start: now - 300000, end: now })
+    assert.deepEqual(editor.view, { start: now - 7200000, end: now - 3600000 })
+    assert.ok(side.agents.reduce((n, a) => n + a.segments.length, 0) < 4000)
+    assert.ok(editor.agents.reduce((n, a) => n + a.segments.length, 0) < 4000)
+    const legacy = await handler({ hideShortTasks: false })
+    assert.equal(legacy.view, undefined)
+    assert.equal(
+      legacy.agents.reduce((n, a) => n + a.segments.length, 0),
+      4000
+    )
+    assert.ok(legacy.agents.some((a) => a.omittedSegments))
+  } finally {
+    await deactivate()
+  }
+})
 
 test('worker lifecycle persists only public observations and restores without bridging offline time', async () => {
   const f = workerFixture()

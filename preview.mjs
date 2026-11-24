@@ -33,7 +33,8 @@ export async function startPreview({ port = 0 } = {}) {
     'timeline-evidence.mjs': ['timeline-evidence.mjs', 'text/javascript'],
     'shared-preferences.mjs': ['shared-preferences.mjs', 'text/javascript'],
     'panel.fixture.mjs': ['panel.fixture.mjs', 'text/javascript'],
-    'view-preferences.mjs': ['view-preferences.mjs', 'text/javascript']
+    'view-preferences.mjs': ['view-preferences.mjs', 'text/javascript'],
+    'view-window.mjs': ['view-window.mjs', 'text/javascript']
   }
   const themeSource = await readFile(new URL('./assets/preview-theme.css', import.meta.url), 'utf8')
   const themeNames = [

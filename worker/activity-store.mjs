@@ -1,5 +1,6 @@
 import { projectKey, terminalKey } from '../pin-identity.mjs'
 import { segmentAt, isActiveState } from '../timeline-evidence.mjs'
+import { viewWindow } from '../view-window.mjs'
 
 export const WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 const STATES = new Set(['working', 'blocked', 'waiting', 'done', 'unknown'])
@@ -240,6 +241,61 @@ function limitTimeline(agents, messages) {
     if (activityBounds.length) agent.omittedActivity = activityBounds
   }
   return true
+}
+
+// Keep original boundaries and state/source fields. The context around a short
+// display bridge proves its join even when the viewport starts or ends in a gap.
+// Mail retrieval can be outside the plotted send window and still needs evidence.
+function windowTimeline(agents, messages, range) {
+  const endpoints = new Map()
+  const add = (id, at) => {
+    if (!endpoints.has(id)) endpoints.set(id, [])
+    endpoints.get(id).push(at)
+  }
+  for (const message of messages) {
+    add(message.from, message.at)
+    add(message.to, message.at)
+    if (Number.isFinite(message.deliveredAt)) add(message.to, message.deliveredAt)
+  }
+  for (const agent of agents) {
+    const segments = agent.segments
+    const keep = new Set()
+    let previous
+    let first = -1
+    let last = -1
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i]
+      if (segment.end <= range.start && segment.state !== 'unknown') previous = segment
+      if (segment.end <= range.start || segment.start >= range.end) continue
+      keep.add(segment)
+      if (first === -1) first = i
+      last = i
+    }
+    for (const [edge, direction] of [
+      [first, -1],
+      [last, 1]
+    ]) {
+      let index = edge
+      if (!segments[index]?.joinedWork) continue
+      while (segments[index]?.joinedWork) {
+        keep.add(segments[index])
+        index += direction
+      }
+      if (segments[index]?.state === 'working') keep.add(segments[index])
+    }
+    if (previous) keep.add(previous)
+    for (const at of endpoints.get(agent.id) ?? []) {
+      const segment = segmentAt(segments, at)
+      if (segment) keep.add(segment)
+    }
+    agent.segments = segments.filter((segment) => keep.has(segment))
+    if (agent.stateEvents) {
+      agent.stateEvents = agent.stateEvents.filter(
+        (event) => event.at >= range.start && event.at <= range.end
+      )
+      if (!agent.stateEvents.length) delete agent.stateEvents
+    }
+  }
 }
 
 export function timestamp(value) {
@@ -541,10 +597,11 @@ export class ActivityStore {
   // Raw consumers retain the unfiltered view; panel/preview endpoints supply the preference.
   snapshot(
     now = Date.now(),
-    { hideShortTasks = false, attempts = [], pinnedTerminals = [], pinnedProjects = [] } = {}
+    { hideShortTasks = false, attempts = [], pinnedTerminals = [], pinnedProjects = [], view } = {}
   ) {
     this.prune(now)
     const windowStart = now - WINDOW_MS
+    const range = viewWindow(now, windowStart, view)
     const pins = new Set(pinnedTerminals)
     const projects = new Set(pinnedProjects)
     const headings = new Map()
@@ -689,9 +746,13 @@ export class ActivityStore {
     // Reserve snapshot places for explicitly pinned identities before the normal lane cap.
     if (agents.length > 160 && pins.size)
       agents.sort((a, b) => Number(pins.has(terminalKey(b))) - Number(pins.has(terminalKey(a))))
-    const visible = selectLanes(agents, this.messages.values(), pins, now)
+    const candidates = [...this.messages.values(), ...attempts].filter(
+      (message) =>
+        message.at <= now && (!range || (message.at >= range.start && message.at <= range.end))
+    )
+    const visible = selectLanes(agents, candidates, pins, now)
     const ids = new Set(visible.map((agent) => agent.id))
-    const messages = [...this.messages.values(), ...attempts]
+    const messages = candidates
       .filter(
         (message) =>
           message.at <= now &&
@@ -700,10 +761,12 @@ export class ActivityStore {
       )
       .sort((a, b) => a.at - b.at)
     const shown = messages.slice(-600)
+    if (range) windowTimeline(visible, shown, range)
     const trimmed = limitTimeline(visible, shown)
     return {
       now,
       windowStart,
+      ...(range && { view: range }),
       agents: visible,
       pinnedProjects: [...headings.values()],
       messages: shown.map(snapshotValue),

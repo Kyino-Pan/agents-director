@@ -75,6 +75,7 @@ test('pinned projects and terminals stay scoped, searchable and keyboard accessi
     )
     await page.locator('#zoom').focus()
     await page.keyboard.press('Home')
+    await page.locator('.lane[data-agent="quiet-a"]').waitFor({ state: 'detached' })
     assert.deepEqual(await lanes(page), ['quiet-b', 'active-b', 'active-a'])
     assert.equal(await page.locator('.project-row').count(), 3)
     assert.equal(await quiet.locator('.lane-state').innerText(), 'No activity in this window')
@@ -293,8 +294,9 @@ test('two open views persist consecutive toggles and language, and keep collecti
       await editor.evaluate(() =>
         window.snapshotRequests.every(
           (args) =>
-            Object.keys(args).sort().join() === 'hideShortTasks,withOmittedActivity' &&
-            args.withOmittedActivity === true
+            Object.keys(args).sort().join() === 'hideShortTasks,view,withOmittedActivity' &&
+            args.withOmittedActivity === true &&
+            args.view.hours > 0
         )
       ),
       true

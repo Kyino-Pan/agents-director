@@ -47,6 +47,12 @@ for (const [width, dark] of [
       await page.getByRole('button', { name: 'Group related lanes' }).click()
       await page.getByRole('slider', { name: 'Window' }).focus()
       await page.keyboard.press('Home')
+      await page.waitForFunction(
+        () =>
+          Date.parse(document.getElementById('range-end').value) -
+            Date.parse(document.getElementById('range-start').value) ===
+          300000
+      )
       await page.getByRole('searchbox').fill('task')
       const period = await page.locator('#period').textContent()
       await page.getByRole('button', { name: 'Pause view' }).click()
@@ -69,7 +75,11 @@ for (const [width, dark] of [
           (await window.orca.storage.get('view:window-hours')) === 1 / 12
       )
       assert.deepEqual(
-        await page.evaluate(() => window.snapshotRequests.map((input) => input.hideShortTasks)),
+        await page.evaluate(() =>
+          window.snapshotRequests
+            .map((input) => input.hideShortTasks)
+            .filter((value, index, values) => !index || value !== values[index - 1])
+        ),
         [true, false]
       )
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))

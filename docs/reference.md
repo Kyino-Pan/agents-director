@@ -140,7 +140,17 @@ Messages that never had an accepted receipt or a verified check cannot be
 reconstructed from this change. The plugin does not query CLI inbox history,
 infer a sender from text, or turn provider-internal collaboration into Orca mail.
 
-When demand exceeds 4,000 segments, the snapshot first reserves the
+Each frame requests its visible duration and either a live end or an anchored
+pan/pause end. The worker applies that window before allocating segment places,
+retaining exact crossing intervals, short-gap join evidence at the edges, the
+previous observed state and plotted mail endpoints (including later retrieval).
+Older intervals outside that view do not compete with its working bars. Each
+frame has its own request; changing the window discards older replies and keeps
+the previous complete plot until the new one arrives. Pausing anchors the time
+window while window changes can still request its recorded history. Callers that
+omit the window keep the original seven-day snapshot contract.
+
+When the requested evidence exceeds 4,000 segments, the snapshot first reserves the
 existing intervals covering both endpoints at the plotted message time, the
 receiver at retrieval, and each lane's latest interval. Sparse lanes keep
 their full history when it fits. Dense lanes share the budget and fill their
