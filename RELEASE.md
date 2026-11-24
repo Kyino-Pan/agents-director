@@ -15,6 +15,9 @@ Requires Orca **>=1.4.260 / Host API 1.10**.
   replies cannot replace a newer view.
 - Preserve verified local coordination under lane, segment and receipt limits,
   including retained message endpoints and safely framed mailbox batches.
+- Resolve a verified new terminal launch's creation time through its public
+  workspace history when the global history list misses it. Keep both spawn
+  endpoints together within the remaining lane budget, including idle endpoints.
 - Keep the live label steady during background refreshes, and use pushpin icons
   for pinned projects and terminals.
 

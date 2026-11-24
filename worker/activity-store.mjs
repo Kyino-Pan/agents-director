@@ -126,7 +126,7 @@ function snapshotValue(value) {
 // Choose membership before sorting for display. Pins keep their existing priority;
 // verified mail reserves both endpoints together, newest plotted time first. A pair
 // that cannot fit is skipped, never converted into a receiver-only observation.
-function selectLanes(agents, messages, pins, now) {
+function selectLanes(agents, messages, pins, now, range) {
   const budget = 160
   if (agents.length <= budget) return agents
   const available = new Set(agents.map((agent) => agent.id))
@@ -151,6 +151,23 @@ function selectLanes(agents, messages, pins, now) {
       [message.from, message.to].filter((id) => id !== null && !selected.has(id))
     )
     if (selected.size + missing.size <= budget) {
+      for (const id of missing) selected.add(id)
+    }
+  }
+  const spawns = agents
+    .filter(
+      (agent) =>
+        available.has(agent.parentId) &&
+        agent.parentId !== agent.id &&
+        Number.isFinite(agent.spawnedAt) &&
+        agent.spawnedAt >= now - WINDOW_MS &&
+        agent.spawnedAt <= now &&
+        (!range || (agent.spawnedAt >= range.start && agent.spawnedAt <= range.end))
+    )
+    .sort((a, b) => b.spawnedAt - a.spawnedAt || a.id.localeCompare(b.id))
+  for (const child of spawns) {
+    const missing = [child.parentId, child.id].filter((id) => !selected.has(id))
+    if (selected.size + missing.length <= budget) {
       for (const id of missing) selected.add(id)
     }
   }
@@ -750,7 +767,7 @@ export class ActivityStore {
       (message) =>
         message.at <= now && (!range || (message.at >= range.start && message.at <= range.end))
     )
-    const visible = selectLanes(agents, candidates, pins, now)
+    const visible = selectLanes(agents, candidates, pins, now, range)
     const ids = new Set(visible.map((agent) => agent.id))
     const messages = candidates
       .filter(

@@ -81,15 +81,15 @@ policy. A cancelled focus reports failure even if a resume already started.
 
 The worker calls only:
 
-| Method                                            | Purpose                                          |
-| ------------------------------------------------- | ------------------------------------------------ |
-| `workspace.list({ includeStatus: true })`         | Discover public workspace ids and names          |
-| `project.list({})`                                | Resolve project names on the matching host       |
-| `agents.list({ workspaceId })`                    | Observe each workspace's current terminal agents |
-| `agent.listSessions({ limit: 200 })`              | Read newest session summaries every 30 seconds   |
-| `agent.listSessions({ workspaceId, limit: 200 })` | Verify a saved session on a navigation action    |
-| `agent.resume({ workspaceId, agent, sessionId })` | Resume after a navigation action                 |
-| `terminal.focus({ terminalId })`                  | Focus a freshly matched or resumed terminal      |
+| Method                                            | Purpose                                                   |
+| ------------------------------------------------- | --------------------------------------------------------- |
+| `workspace.list({ includeStatus: true })`         | Discover public workspace ids and names                   |
+| `project.list({})`                                | Resolve project names on the matching host                |
+| `agents.list({ workspaceId })`                    | Observe each workspace's current terminal agents          |
+| `agent.listSessions({ limit: 200 })`              | Read newest session summaries every 30 seconds            |
+| `agent.listSessions({ workspaceId, limit: 200 })` | Verify launch creation time or a saved navigation session |
+| `agent.resume({ workspaceId, agent, sessionId })` | Resume after a navigation action                          |
+| `terminal.focus({ terminalId })`                  | Focus a freshly matched or resumed terminal               |
 
 Current inventories refresh every five seconds, at most four workspace requests
 at a time. `agent.status.changed` updates identities already known from public
@@ -165,6 +165,11 @@ carry a clipping notice when another event or a pin keeps the lane visible. “H
 a window contains no retained state interval. The recorder bounds
 points and messages at 5,000 each.
 
+After pins and verified mail reserve lanes, in-window verified spawns reserve
+both eligible endpoints together within the remaining 160 places. An endpoint
+with no other activity can still show its real spawn. An unfit pair is skipped;
+no replacement parent or child is invented. The short-task policy still applies.
+
 **Other coverage limits.** There is no public coordination history feed. Conversation
 bodies, recent user inputs, process memory and private execution metadata are unavailable. The recent-input section explains that
 conversation text is unavailable. No terminal screen scraping is used to infer it.
@@ -211,6 +216,11 @@ Agents Director custom editor at five-minute zoom and `orca plugin shot`.
   including a task title and a base branch for a new worktree. An attached
   existing terminal (`--terminal`) can establish a dispatch address.
   It cannot create a parent relationship. `agent resume` is excluded.
+  If the global session list lacks a proven launch's creation time, the collector
+  asks that session's workspace history. At most four workspace reads start per
+  inventory scan, and each pending workspace is retried at most once per 30 seconds
+  within the existing two-minute evidence lifetime. A missing, denied or older
+  creation time still cannot establish a parent. No private history is read.
 - Sender and receiver identities come from the live terminal inventory and status
   changes. An observed ready dispatch can resolve `dispatch:…` to the same live
   terminal session. For a bot, run, implicit mailbox or unmapped dispatch, a matching

@@ -482,6 +482,16 @@ export class RouteEvidence {
     this.launches.delete(terminal)
   }
 
+  pendingLaunchWorkspaces() {
+    const workspaces = new Set()
+    for (const launch of this.launches.values()) {
+      if (launch.attached || !launch.child) continue
+      const agent = this.store.agents.get(launch.child.id)
+      if (agent?.workspace && !Number.isFinite(agent.createdAt)) workspaces.add(agent.workspace)
+    }
+    return workspaces
+  }
+
   attempts() {
     const attempts = []
     for (const { action, source, target, at, seq, ambiguous } of this.calls.values()) {
