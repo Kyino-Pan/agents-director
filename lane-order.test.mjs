@@ -6,7 +6,7 @@ const END = 100000
 const agent = (id, projectId = 'project', at = END - Number(id) - 1) => ({
   id: String(id),
   projectId,
-  segments: [{ start: at, end: END, state: 'done' }]
+  segments: [{ start: at, end: END, state: 'done', completionSince: at }]
 })
 const message = (from, to, at = 100) => ({ from: String(from), to: String(to), at })
 const ids = (agents) => agents.map((item) => item.id)

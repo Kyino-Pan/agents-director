@@ -1,12 +1,15 @@
+import { languages } from './shared-preferences.mjs'
 const KEYS = {
   hours: 'view:window-hours',
   compactLanes: 'view:compact-lanes',
-  hideShortTasks: 'view:hide-short-tasks'
+  hideShortTasks: 'view:hide-short-tasks',
+  language: 'view:language'
 }
-const valid = (key, value) =>
-  key === 'hours'
-    ? Number.isFinite(value) && value >= 1 / 60 && value <= 168
-    : typeof value === 'boolean'
+function valid(key, value) {
+  if (key === 'hours') return Number.isFinite(value) && value >= 1 / 60 && value <= 168
+  if (key === 'language') return languages.includes(value)
+  return typeof value === 'boolean'
+}
 
 export async function loadViewPreferences(
   storage = window.orca?.storage ?? {
@@ -14,7 +17,12 @@ export async function loadViewPreferences(
     set: async (key, value) => localStorage.setItem(`agent-activity:${key}`, JSON.stringify(value))
   }
 ) {
-  const state = { hours: 24, compactLanes: false, hideShortTasks: true }
+  const state = {
+    hours: 24,
+    compactLanes: false,
+    hideShortTasks: true,
+    language: 'auto'
+  }
   await Promise.all(
     Object.entries(KEYS).map(async ([key, storedKey]) => {
       try {
@@ -48,7 +56,12 @@ export async function loadViewPreferences(
   return Object.assign(state, {
     set(patch, defer = false) {
       for (const [key, value] of Object.entries(patch)) {
-        if (Object.hasOwn(KEYS, key) && valid(key, value) && state[key] !== value) {
+        if (
+          key !== 'language' &&
+          Object.hasOwn(KEYS, key) &&
+          valid(key, value) &&
+          state[key] !== value
+        ) {
           state[key] = value
           pending.set(key, value)
         }

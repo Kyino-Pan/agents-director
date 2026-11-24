@@ -1,11 +1,9 @@
 :root {
   color-scheme: light dark;
-  --activity-working: color-mix(in srgb, var(--orca-foreground) 55%, var(--orca-background));
-  --activity-active: var(--orca-foreground);
+  --activity-working: light-dark(#577c37, #a3c780);
   --activity-blocked: color-mix(in srgb, var(--orca-destructive) 70%, var(--orca-background));
   --activity-waiting: color-mix(in srgb, var(--orca-foreground) 28%, var(--orca-background));
   --activity-done: color-mix(in srgb, var(--orca-foreground) 16%, var(--orca-background));
-  --activity-unknown: var(--orca-border);
   --font-mono: 'Geist Mono', monospace;
   --control-radius: calc(var(--orca-radius, 0.5rem) - 2px);
 }
@@ -48,6 +46,31 @@ button[aria-pressed='true'] {
   background: var(--orca-accent);
   color: var(--orca-accent-foreground);
 }
+.toolbar-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.toolbar-toggle::before {
+  content: '';
+  width: 5px;
+  height: 9px;
+  border: solid transparent;
+  border-width: 0 2px 2px 0;
+  transform: translateY(-1px) rotate(45deg);
+}
+.toolbar-toggle[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--activity-working) 15%, var(--orca-background));
+  border-color: var(--activity-working);
+  color: var(--orca-foreground);
+}
+.toolbar-toggle[aria-pressed='true']::before {
+  border-color: currentColor;
+}
+.toolbar-toggle[aria-pressed='true']:hover {
+  background: color-mix(in srgb, var(--activity-working) 26%, var(--orca-background));
+}
 button:disabled {
   opacity: 0.5;
   cursor: default;
@@ -80,15 +103,22 @@ summary:focus-visible,
 .heading {
   display: flex;
   align-items: center;
-  gap: 12px;
-  justify-content: space-between;
-  margin-bottom: 16px;
+  gap: 4px 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 h1,
 h2 {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
+}
+.heading h1 {
+  font-size: 12px;
+}
+#plugin-version {
+  font-weight: 400;
+  color: var(--orca-muted-foreground);
 }
 .live {
   display: inline-flex;
@@ -277,9 +307,6 @@ input::placeholder {
 .done {
   --state: var(--activity-done);
 }
-.unknown {
-  --state: var(--activity-unknown);
-}
 .connector-legend {
   margin-left: 4px;
 }
@@ -448,11 +475,9 @@ input::placeholder {
   fill: var(--state);
   pointer-events: none;
 }
-.segment.unknown {
-  fill: var(--orca-border);
-}
-.segment.current.working {
-  fill: var(--activity-active);
+.segment.unknown,
+.legend .unknown {
+  fill: url(#unobserved-hatch);
 }
 .segment-hit {
   fill: transparent;
@@ -514,12 +539,17 @@ input::placeholder {
   stroke-width: 1;
   opacity: 0.5;
 }
+.unobserved-endpoint {
+  fill: var(--orca-background);
+  stroke: var(--orca-foreground);
+  opacity: 1;
+}
 .message-target:hover .message-path,
 .message-target[data-selected='true'] .message-path {
   opacity: 1;
   stroke-width: 1.5;
 }
-.message-target[data-selected='true'] .message-dot {
+.message-target[data-selected='true'] .message-dot:not(.unobserved-endpoint) {
   fill: var(--orca-foreground);
 }
 .empty {
@@ -758,6 +788,10 @@ input::placeholder {
   background: var(--orca-popover, var(--orca-background));
 }
 #activity-menu button {
+  height: auto;
+  min-height: 30px;
+  white-space: normal;
+  overflow-wrap: anywhere;
   display: block;
   width: 100%;
   border: 0;
@@ -826,4 +860,66 @@ input::placeholder {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   user-select: text;
+}
+
+.status-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.language-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--orca-muted-foreground);
+  font-size: 11px;
+}
+.language-control select {
+  max-width: 125px;
+  min-height: 24px;
+  font: inherit;
+  color: var(--orca-foreground);
+  background: var(--orca-background);
+  border: 1px solid var(--orca-border);
+  border-radius: var(--control-radius);
+}
+.lane-row,
+.project-row {
+  position: relative;
+}
+.project-heading {
+  padding-right: 24px;
+}
+.lane-heading {
+  padding-right: 12px;
+}
+.pin-control {
+  position: absolute;
+  right: 1px;
+  top: 0;
+  height: 18px;
+  width: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--orca-muted-foreground);
+  font-size: 14px;
+  line-height: 1;
+}
+.project-row .pin-control {
+  top: 6px;
+}
+.pin-control[aria-pressed='false'] {
+  opacity: 0;
+}
+:is(.lane-row, .project-row):hover > .pin-control,
+.pin-control:focus-visible {
+  opacity: 1;
+}
+.pin-control::before {
+  content: '☆';
+}
+.pin-control[aria-pressed='true']::before {
+  content: '★';
 }

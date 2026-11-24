@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { test } from 'node:test'
 import { startPreview } from './preview.mjs'
 import { snapshot } from './panel.fixture.mjs'
+import { denseRecorder, fixtureNow } from './worker/snapshot-budget.fixture.mjs'
 import { browser, pageFor } from './panel-test-browser.mjs'
 
 test('timeline filters, range, keyboard inspection and literal message text', async () => {
@@ -379,23 +380,48 @@ test('old payloads and duplicate names retain separate stable identities across 
 test('thin history tracks keep accessible states and generous targets in both host themes', async () => {
   const data = structuredClone(snapshot)
   const ago = (hours) => data.now - hours * 3_600_000
+  const interval = (from, to, state) => ({
+    start: ago(from),
+    end: ago(to),
+    state,
+    source: 'fixture'
+  })
   data.agents = [
     {
       id: 'states',
-      label: 'Observed states',
+      label: 'Coordinator',
+      provider: 'Codex',
       projectId: 'p',
-      projectName: 'Project',
-      segments: ['working', 'blocked', 'waiting', 'done', 'working', 'unknown'].map(
-        (state, index) => ({
-          start: ago(12 - index * 2),
-          end: ago(10 - index * 2),
-          state,
-          source: 'fixture'
-        })
-      )
+      projectName: 'Orca',
+      segments: [
+        interval(23, 19, 'working'),
+        interval(19, 17, 'blocked'),
+        interval(17, 15, 'waiting'),
+        interval(15, 10, 'done'),
+        interval(10, 5, 'unknown'),
+        interval(5, 4.5, 'done'),
+        interval(4.5, 4, 'unknown'),
+        interval(4, 3, 'done'),
+        interval(3, 2.975, 'unknown'),
+        interval(2.975, 0, 'working')
+      ]
+    },
+    {
+      id: 'run',
+      label: 'Activity collector',
+      provider: 'Claude',
+      projectId: 'p',
+      projectName: 'Orca',
+      segments: [
+        { start: ago(18), end: ago(1), state: 'working' },
+        { start: ago(1), end: ago(1) + 1000, state: 'unknown', joinedWork: true },
+        { start: ago(1) + 1000, end: data.now, state: 'working' }
+      ]
     }
   ]
-  data.messages = []
+  data.messages = [
+    { ...data.messages[0], from: 'states', to: 'run', at: ago(13), deliveredAt: ago(13) }
+  ]
   for (const width of [1100, 320]) {
     for (const dark of [false, true]) {
       const { page, errors } = await pageFor({ width, height: 820, dark, data })
@@ -405,7 +431,59 @@ test('thin history tracks keep accessible states and generous targets in both ho
           await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
           dark ? 'dark' : 'light'
         )
-        assert.equal(await page.locator('#chart text, #chart pattern').count(), 0)
+        assert.equal(await page.locator('#chart text').count(), 0)
+        assert.equal(await page.locator('pattern#unobserved-hatch').count(), 1)
+        const hatchFill = await page
+          .locator('.legend svg.unknown > rect')
+          .evaluate((el) => getComputedStyle(el).fill)
+        assert.match(hatchFill, /#unobserved-hatch/)
+        assert.deepEqual(
+          await page
+            .locator('.segment.unknown')
+            .evaluateAll((bars) => bars.map((bar) => getComputedStyle(bar).fill)),
+          [hatchFill, hatchFill, hatchFill]
+        )
+        const narrow = page.locator('.segment.unknown').last()
+        const narrowWidth = Number(await narrow.getAttribute('width'))
+        assert.ok(narrowWidth > 0 && narrowWidth < 1)
+        assert.equal(await narrow.locator('..').locator('.segment-hit').getAttribute('width'), '8')
+        if (width === 1100 && process.env.ACTIVITY_SCREENSHOTS) {
+          const top = Math.floor((await page.locator('.legend').boundingBox()).y)
+          const lanes = await page.locator('#lanes').boundingBox()
+          await mkdir(process.env.ACTIVITY_SCREENSHOTS, { recursive: true })
+          await page.screenshot({
+            path: `${process.env.ACTIVITY_SCREENSHOTS}/unobserved-${dark ? 'dark' : 'light'}.png`,
+            clip: { x: 0, y: top, width, height: Math.ceil(lanes.y + lanes.height) - top + 8 }
+          })
+        }
+        await narrow.locator('..').press('Enter')
+        assert.match(
+          await page.locator('#detail-heading').textContent(),
+          /Coordinator · Unobserved/
+        )
+        assert.match(await page.locator('#detail-meta').textContent(), /1 min$/)
+        await page.keyboard.press('Escape')
+        const bamboo = dark ? 'rgb(163, 199, 128)' : 'rgb(87, 124, 55)'
+        assert.equal(
+          await page
+            .locator('.swatch.working')
+            .evaluate((el) => getComputedStyle(el).backgroundColor),
+          bamboo
+        )
+        for (const selector of [
+          '.segment.working:not(.current)',
+          '.segment.working.current',
+          '.run-bar'
+        ]) {
+          assert.equal(
+            await page
+              .locator(selector)
+              .first()
+              .evaluate((el) => getComputedStyle(el).fill),
+            bamboo,
+            selector
+          )
+        }
         for (const state of ['working', 'blocked', 'waiting', 'done', 'unknown']) {
           // A ResizeObserver redraw replaces SVG children. Resolve and measure within
           // one browser task so a detached locator handle cannot supply zero geometry.
@@ -447,7 +525,7 @@ test('thin history tracks keep accessible states and generous targets in both ho
             )
             assert.match(
               await page.locator('#detail-body').textContent(),
-              /Last observed: Working through/
+              /Last observed: Done through/
             )
           }
           await page.keyboard.press('Escape')
@@ -626,7 +704,10 @@ test('only agents with evidence in the selected time window are visible', async 
     agent('old-done', [{ start: now - 50 * hour, end: now, state: 'done' }]),
     agent('unobserved', [{ start: now - hour, end: now, state: 'unknown' }]),
     agent('current-work', [{ start: now - 2 * hour, end: now, state: 'working' }]),
-    agent('message-only', [{ start: now - hour, end: now, state: 'unknown' }])
+    agent('message-only', [
+      { start: now - 32 * hour, end: now - 31 * hour, state: 'waiting' },
+      { start: now - hour, end: now, state: 'unknown' }
+    ])
   ]
   data.messages = [
     { ...data.messages[0], from: 'message-only', to: 'current-work', at: now - hour }
@@ -636,14 +717,21 @@ test('only agents with evidence in the selected time window are visible', async 
     'Agent current-work',
     'Agent message-only'
   ])
+  assert.deepEqual(await page.locator('.lane-state').allTextContents(), [
+    'Working',
+    'Messages only'
+  ])
   await page.getByRole('slider', { name: 'Window' }).focus()
   await page.keyboard.press('End')
   assert.deepEqual(await page.locator('.lane-name').allTextContents(), [
     'Agent current-work',
     'Agent message-only',
-    'Agent old-work',
-    'Agent old-done'
+    'Agent old-work'
   ])
+  assert.equal(
+    await page.locator('[data-agent="message-only"] .lane-state').textContent(),
+    'Last: Waiting'
+  )
   await page.keyboard.press('Home')
   assert.deepEqual(await page.locator('.lane-name').allTextContents(), ['Agent current-work'])
   assert.deepEqual(errors, [])
@@ -786,6 +874,266 @@ test('message groups update their statuses and selection as transient attempts s
     await group.waitFor({ state: 'detached' })
     assert.equal(await page.locator('#detail').isVisible(), false)
     assert.equal(await page.locator('#failure').isVisible(), false)
+    assert.deepEqual(errors, [])
+  } finally {
+    await page.close()
+  }
+})
+
+test('dense history shows window-local evidence on lanes and in details', async () => {
+  const data = denseRecorder().snapshot(fixtureNow)
+  const { page, errors } = await pageFor({
+    data,
+    preferences: new Map([['view:window-hours', 1 / 12]])
+  })
+  try {
+    const lane = (id) => page.locator(`.lane[data-agent="${id}"]`)
+    for (const [id, label] of [
+      ['Reviewer', 'Last: Working'],
+      ['Worker', 'Last: Done'],
+      ['Coordinator', 'Last: Done'],
+      ['Mailbox', 'Messages only']
+    ]) {
+      assert.equal(await lane(id).locator('.lane-state').textContent(), label)
+      await lane(id).click()
+      assert.equal(await page.locator('#detail-meta').textContent(), label)
+      await page.keyboard.press('Escape')
+    }
+    assert.equal(await page.locator('.segment-target[data-agent="Mailbox"]').count(), 0)
+    assert.equal(await page.locator('.mailbox-input').count(), 1)
+    assert.equal(
+      await page.locator('.message-target[data-from="Reviewer"][data-to="Coordinator"]').count(),
+      1
+    )
+
+    assert.deepEqual(errors, [])
+  } finally {
+    await page.close()
+  }
+})
+
+async function setDenseWindow(page, from, to) {
+  await page.evaluate(
+    ([from, to]) => {
+      const start = document.getElementById('range-start')
+      const end = document.getElementById('range-end')
+      start.value = '2026-11-02T' + from
+      end.value = '2026-11-02T' + to
+      end.dispatchEvent(new Event('change'))
+    },
+    [from, to]
+  )
+}
+
+for (const [surface, width, height] of [
+  ['panel', 600, 995],
+  ['editor', 920, 600]
+]) {
+  test(`omitted intervals intersect the selected window on the ${surface} layout`, async () => {
+    const recorder = denseRecorder()
+    recorder.message({
+      id: 'archived-send',
+      from: 'Reviewer',
+      to: 'Coordinator',
+      at: fixtureNow - 6 * 3600000,
+      type: 'Send accepted'
+    })
+    const { page, errors } = await pageFor({ width, height, data: recorder.snapshot(fixtureNow) })
+    const lane = page.locator('.lane[data-agent="Coordinator"]')
+    const bars = page.locator('.segment-target[data-agent="Coordinator"]')
+    try {
+      for (const [from, to, label, messages] of [
+        ['07:58', '08:03', 'Messages only', 3],
+        ['09:59', '10:04', 'Last retained: Working', 1],
+        ['10:10', '10:15', 'History limited', 0]
+      ]) {
+        await setDenseWindow(page, from, to)
+        assert.equal(await lane.locator('.lane-state').textContent(), label)
+        assert.equal(await bars.count(), messages === 1 ? 1 : 0)
+        assert.match(
+          await page.locator('#summary').textContent(),
+          new RegExp(
+            '· ' +
+              messages +
+              (messages === 1 ? ' coordination message$' : ' coordination messages$')
+          )
+        )
+        await lane.click()
+        assert.equal(await page.locator('#detail-meta').textContent(), label)
+        const detail = await page.locator('#detail-body').textContent()
+        if (messages === 3) {
+          assert.match(detail, /Coordination messages/)
+          assert.doesNotMatch(detail, /omitted/)
+        } else {
+          assert.match(detail, /555 segments omitted across this lane/)
+        }
+        if (process.env.ACTIVITY_SCREENSHOTS) {
+          await mkdir(process.env.ACTIVITY_SCREENSHOTS, { recursive: true })
+          await page.screenshot({
+            animations: 'disabled',
+            path: `${process.env.ACTIVITY_SCREENSHOTS}/${surface}-${from.replace(':', '')}.png`
+          })
+        }
+        await page.keyboard.press('Escape')
+      }
+      // The final omitted range ends at 13:58. Touching an endpoint
+      // has zero overlap. One second inside the range is enough.
+      await setDenseWindow(page, '09:15', '09:20')
+      assert.equal(await lane.count(), 0)
+      await setDenseWindow(page, '09:15:01', '09:20:01')
+      assert.equal(await lane.locator('.lane-state').textContent(), 'History limited')
+      for (const [from, overlaps] of [
+        ['13:57:59', true],
+        ['13:58:00', false]
+      ]) {
+        await setDenseWindow(page, from, '14:03')
+        assert.ok((await bars.count()) > 0)
+        // The retained Working → Done observation is exactly at the right boundary.
+        assert.equal(await lane.locator('.lane-state').textContent(), 'Done')
+        await lane.click()
+        assert.equal(await page.locator('#detail-meta').textContent(), 'Done')
+        assert.equal(
+          (await page.locator('#detail-body').textContent()).includes('omitted'),
+          overlaps
+        )
+        await page.keyboard.press('Escape')
+      }
+      assert.deepEqual(errors, [])
+    } finally {
+      await page.close()
+    }
+  })
+}
+
+test('selected segment follows its lane and start through refresh, trimming and window changes', async () => {
+  const recorder = denseRecorder()
+  const ten = fixtureNow - 6 * 3600000
+  recorder.point('peer-at-ten', 'Peer', ten, 'working', 'live', ten + 30000)
+  const unpinned = recorder.snapshot(fixtureNow)
+  function addReceipt(id, minutesBeforeNow) {
+    recorder.message({
+      id,
+      from: 'Reviewer',
+      to: 'Coordinator',
+      at: fixtureNow - minutesBeforeNow * 60000,
+      type: 'Send accepted'
+    })
+    return recorder.snapshot(fixtureNow)
+  }
+  const pinned = addReceipt('pin-1000', 360)
+  const { page, errors } = await pageFor({ data: pinned })
+  const bar = page.locator('.segment-target[data-agent="Coordinator"]:has(.segment.working)')
+  const detail = page.locator('#detail')
+  const selected = page.locator('.segment-target[data-selected="true"]')
+  const refresh = (snapshot) =>
+    page.evaluate((data) => {
+      window.testSnapshot = data
+      window.notifyActivity()
+    }, snapshot)
+  try {
+    await setDenseWindow(page, '09:59', '10:04')
+    await bar.press('Enter')
+    const meta = await page.locator('#detail-meta').textContent()
+    assert.match(meta, /10:00:00.*10:00:30/)
+    assert.equal(await bar.getAttribute('data-segment'), '0')
+    const both = addReceipt('pin-0940', 380)
+    await refresh(both)
+    await page.locator('.segment-target[data-agent="Coordinator"][data-segment="1"]').waitFor()
+    for (const [from, to] of [
+      ['09:59', '10:04'],
+      ['09:55:15', '10:00:15'],
+      ['10:00:15', '10:05:15']
+    ]) {
+      await setDenseWindow(page, from, to)
+      assert.equal(await selected.count(), 1)
+      assert.equal(await bar.getAttribute('data-selected'), 'true')
+      assert.equal(await detail.isVisible(), true)
+      assert.equal(
+        await page.locator('#detail-heading').textContent(),
+        'Coordinator session · Working'
+      )
+      assert.equal(await page.locator('#detail-meta').textContent(), meta)
+    }
+    // Jump away while the lane still exists. Returning must not reopen stale detail.
+    await setDenseWindow(page, '10:10', '10:15')
+    assert.equal(
+      await page.locator('.lane[data-agent="Coordinator"] .lane-state').textContent(),
+      'History limited'
+    )
+    assert.equal(await selected.count(), 0)
+    assert.equal(await detail.isHidden(), true)
+    await setDenseWindow(page, '09:59', '10:04')
+    assert.equal(await bar.getAttribute('data-selected'), 'false')
+    await bar.press('Enter')
+    await refresh(unpinned)
+    await bar.waitFor({ state: 'detached' })
+    assert.equal(await detail.isHidden(), true)
+    const peer = page.locator('.segment-target[data-agent="Peer"]:has(.segment.working)')
+    assert.equal(await peer.getAttribute('data-selected'), 'false')
+    await refresh(both)
+    await bar.waitFor()
+    assert.equal(await bar.getAttribute('data-selected'), 'false')
+    assert.equal(await detail.isHidden(), true)
+    assert.deepEqual(errors, [])
+  } finally {
+    await page.close()
+  }
+})
+
+test('zoom preserves measured widths and grouped messages describe each endpoint at its own time', async () => {
+  const data = structuredClone(snapshot)
+  const at = data.now - 90000
+  const [sender, receiver] = data.agents
+  sender.segments = [{ start: at, end: at + 900, state: 'working', source: 'live' }]
+  receiver.segments = [{ start: at + 1000, end: at + 2500, state: 'blocked', source: 'live' }]
+  data.agents = [sender, receiver]
+  const base = {
+    from: sender.id,
+    to: receiver.id,
+    at,
+    type: 'Mailbox received',
+    deliveredAt: at + 1100
+  }
+  data.messages = [
+    { ...base, id: 'first' },
+    { ...base, id: 'second', at: at + 1200, deliveredAt: at + 4000 }
+  ]
+  const { page, errors } = await pageFor({ data })
+  try {
+    const group = page.locator('.message-target')
+    const bar = page.locator(`.segment-target[data-agent="${sender.id}"] .segment`)
+    // ResizeObserver can replace the entire SVG between Playwright calls.
+    const width = () =>
+      page.evaluate(
+        (id) =>
+          document.querySelector(`.segment-target[data-agent="${id}"] .segment`).getBBox().width,
+        sender.id
+      )
+    await bar.waitFor({ state: 'attached' })
+    const lowWidth = await width()
+    assert.ok(lowWidth > 0 && lowWidth < 1)
+    assert.equal(await group.count(), 1)
+    assert.equal(await page.locator('.segment-target line').count(), 0)
+    assert.equal(await bar.locator('..').locator('.segment-hit').getAttribute('width'), '8')
+    assert.equal(await group.locator('.unobserved-endpoint.recipient').count(), 1)
+    await group.press('Enter')
+    const detail = page.locator('#detail-body')
+    assert.match(
+      await detail.textContent(),
+      /At send .*Sender: Working · Receiver: No observed state\nAt retrieval .*Receiver: Blocked/
+    )
+    await page.locator('#related-messages button').last().click()
+    assert.match(
+      await detail.textContent(),
+      /At send .*Sender: No observed state · Receiver: Blocked\nAt retrieval .*Receiver: No observed state/
+    )
+    await page.keyboard.press('Escape')
+    await page.getByRole('slider', { name: 'Window' }).focus()
+    await page.keyboard.press('Home')
+    const highWidth = await width()
+    assert.ok(highWidth >= 1 && Math.abs(highWidth / lowWidth - 288) < 0.01)
+    await bar.locator('..').press('Enter')
+    assert.match(await page.locator('#detail-meta').textContent(), /900 ms/)
     assert.deepEqual(errors, [])
   } finally {
     await page.close()

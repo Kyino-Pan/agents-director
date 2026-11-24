@@ -1,3 +1,4 @@
+import { t, locale } from './panel-i18n.mjs'
 // Only the selected conversation lives in this controller. Tokens also invalidate A → B → A races.
 export class DetailInputs {
   key = null
@@ -5,6 +6,8 @@ export class DetailInputs {
   pending = false
   lastRead = 0
   signature = null
+  result = null
+  language = null
 
   select(agent, paused = false) {
     const section = document.getElementById('recent-inputs')
@@ -17,8 +20,10 @@ export class DetailInputs {
       this.pending = false
       this.lastRead = 0
       this.signature = null
+      this.result = null
       document.getElementById('inputs-list').replaceChildren()
     }
+    if (this.result && this.language !== locale) this.render(this.result)
     section.hidden = !key
     if (!key || this.pending || (this.lastRead && (paused || Date.now() - this.lastRead < 4000)))
       return
@@ -53,7 +58,9 @@ export class DetailInputs {
 
   render(result) {
     const signature = JSON.stringify(result)
-    if (signature === this.signature) return
+    if (signature === this.signature && this.language === locale) return
+    this.result = result
+    this.language = locale
     this.signature = signature
     const list = document.getElementById('inputs-list')
     const children = []
@@ -63,15 +70,15 @@ export class DetailInputs {
       item.className = 'user-input'
       const time = document.createElement('time')
       time.textContent = Number.isFinite(input.at)
-        ? new Date(input.at).toLocaleString()
-        : 'Time unavailable'
+        ? new Date(input.at).toLocaleString(locale)
+        : t('Time unavailable')
       if (Number.isFinite(input.at)) time.dateTime = new Date(input.at).toISOString()
       const text = document.createElement('p')
       text.textContent = input.text.slice(0, 4000)
       item.append(time, text)
       if (input.truncated || input.text.length > 4000) {
         const note = document.createElement('small')
-        note.textContent = 'Text truncated'
+        note.textContent = t('Text truncated')
         item.append(note)
       }
       children.push(item)
@@ -80,12 +87,12 @@ export class DetailInputs {
       const note = document.createElement('p')
       note.className = 'inputs-note'
       note.textContent = result.loading
-        ? 'Loading recent inputs…'
+        ? t('Loading recent inputs…')
         : result.unavailable
-          ? result.reason || 'Recent user inputs unavailable.'
+          ? t(result.reason || 'Recent user inputs unavailable.')
           : result.limited
-            ? 'Only inputs in the bounded source tail are available.'
-            : 'No recorded user inputs.'
+            ? t('Only inputs in the bounded source tail are available.')
+            : t('No recorded user inputs.')
       children.push(note)
     }
     const detail = document.getElementById('detail')

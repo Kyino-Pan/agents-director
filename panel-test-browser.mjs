@@ -1,8 +1,11 @@
+import { createOmissionReplies } from './worker/snapshot-omissions.mjs'
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { before, after } from 'node:test'
-import { snapshot } from './panel.fixture.mjs'
+import { createHeadingPages } from './worker/project-headings.mjs'
+import { createSharedPreferences } from './shared-preferences.mjs'
+import { snapshot, fixturePreferences } from './panel.fixture.mjs'
 
 const require = createRequire(import.meta.url)
 const { chromium } = require('playwright')
@@ -15,6 +18,14 @@ before(async () => {
   server = createServer(async (request, response) => {
     const files = {
       '/': ['panel.html', 'text/html'],
+      '/orca-plugin.json': ['orca-plugin.json', 'application/json'],
+      '/panel-i18n.mjs': ['panel-i18n.mjs', 'text/javascript'],
+      '/pin-identity.mjs': ['pin-identity.mjs', 'text/javascript'],
+      '/locales/fr.mjs': ['locales/fr.mjs', 'text/javascript'],
+      '/locales/de.mjs': ['locales/de.mjs', 'text/javascript'],
+      '/locales/ja.mjs': ['locales/ja.mjs', 'text/javascript'],
+      '/locales/ko.mjs': ['locales/ko.mjs', 'text/javascript'],
+      '/locales/zh.mjs': ['locales/zh.mjs', 'text/javascript'],
       '/panel.css': ['panel.css', 'text/css'],
       '/panel.mjs': ['panel.mjs', 'text/javascript'],
       '/panel-inputs.mjs': ['panel-inputs.mjs', 'text/javascript'],
@@ -25,6 +36,8 @@ before(async () => {
       '/panel-actions.mjs': ['panel-actions.mjs', 'text/javascript'],
       '/lane-order.mjs': ['lane-order.mjs', 'text/javascript'],
       '/lane-motion.mjs': ['lane-motion.mjs', 'text/javascript'],
+      '/timeline-evidence.mjs': ['timeline-evidence.mjs', 'text/javascript'],
+      '/shared-preferences.mjs': ['shared-preferences.mjs', 'text/javascript'],
       '/view-preferences.mjs': ['view-preferences.mjs', 'text/javascript']
     }
     const entry = files[request.url]
@@ -48,6 +61,8 @@ after(async () => {
   await new Promise((resolve) => server?.close(resolve))
 })
 
+const sharedViews = new WeakMap()
+
 export async function pageFor({
   width = 1100,
   height = 820,
@@ -55,34 +70,79 @@ export async function pageFor({
   data = snapshot,
   fail = false,
   userAgent,
+  hostLocale = 'en-US',
+  browserLocale = 'en-US',
   preferences = new Map(),
   getSnapshot,
   getInputs
 } = {}) {
   const page = await browser.newPage({
     viewport: { width, height },
+    locale: browserLocale,
     timezoneId: 'Asia/Shanghai',
     colorScheme: dark ? 'light' : 'dark',
     userAgent
   })
   await page.exposeFunction('readViewPreference', (key) => preferences.get(key) ?? null)
   await page.exposeFunction('writeViewPreference', (key, value) => preferences.set(key, value))
-  if (getSnapshot) {
-    await page.exposeFunction('requestActivitySnapshot', getSnapshot)
+  if (!sharedViews.has(preferences)) {
+    const pages = new Set()
+    const shared = createSharedPreferences(
+      {
+        get: async (key) => preferences.get(key),
+        set: async (key, value) => preferences.set(key, value)
+      },
+      () => {
+        for (const open of pages)
+          void open.evaluate(() => window.notifyActivity?.()).catch(() => {})
+      }
+    )
+    sharedViews.set(preferences, {
+      pages,
+      shared,
+      headings: createHeadingPages(),
+      omissions: createOmissionReplies()
+    })
   }
+  const { pages, shared, headings, omissions } = sharedViews.get(preferences)
+  pages.add(page)
+  page.on('close', () => pages.delete(page))
+  await page.exposeFunction('getProjectHeadings', headings.get)
+  await page.exposeFunction('getOmittedActivity', (token) => omissions.take(page, token))
+  await page.exposeFunction('changeViewPreference', shared.change)
+  await page.exposeFunction('requestActivitySnapshot', async (input, staticSnapshot) => {
+    const prefs = await shared.read()
+    const data = getSnapshot
+      ? await getSnapshot({
+          ...input,
+          pinnedTerminals: prefs.pinnedTerminals,
+          pinnedProjects: prefs.pinnedProjects
+        })
+      : fixturePreferences(staticSnapshot, prefs)
+    const { pinnedProjects = [], ...timeline } = data
+    return {
+      ...omissions.prepare(timeline, input.withOmittedActivity && page),
+      headingVersion: headings.update(pinnedProjects),
+      pinVersion: prefs.pinVersion,
+      language: prefs.language
+    }
+  })
   if (getInputs) await page.exposeFunction('requestRecentInputs', getInputs)
   const errors = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.addInitScript(
-    ({ data, fail }) => {
+    ({ data, fail, hostLocale }) => {
       window.snapshotRequests = []
       window.testSnapshot = data
       window.testFail = fail
       window.orca = {
-        locale: 'en-US',
+        locale: hostLocale,
         storage: { get: window.readViewPreference, set: window.writeViewPreference },
         plugin: {
           request: async (name, input) => {
+            if (name === 'activity.omittedActivity') return window.getOmittedActivity(input.token)
+            if (name === 'activity.projectHeadings') return window.getProjectHeadings(input)
+            if (name === 'activity.changePreference') return window.changeViewPreference(input)
             if (name === 'activity.inputs') {
               return window.requestRecentInputs
                 ? window.requestRecentInputs(input)
@@ -99,9 +159,7 @@ export async function pageFor({
               throw new Error('Worker unavailable')
             }
             window.snapshotRequests.push(input)
-            return window.requestActivitySnapshot
-              ? window.requestActivitySnapshot(input)
-              : window.testSnapshot
+            return window.requestActivitySnapshot(input, window.testSnapshot)
           },
           on: (_event, callback) => {
             window.notifyActivity = callback
@@ -110,7 +168,7 @@ export async function pageFor({
         }
       }
     },
-    { data, fail }
+    { data, fail, hostLocale }
   )
   await page.goto(url)
   const css = await readFile(new URL('./assets/preview-theme.css', directory), 'utf8')

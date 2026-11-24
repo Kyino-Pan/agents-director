@@ -1,3 +1,5 @@
+import { completionInWindow, eventInWindow } from './timeline-evidence.mjs'
+import { projectKey } from './pin-identity.mjs'
 const EXACT_LIMIT = 14
 const cachedOrders = new Map()
 
@@ -23,13 +25,11 @@ function activityTimes(agents, messages, start, end) {
   }
   for (const agent of agents) {
     record(agent.id, agent.spawnedAt)
+    for (const event of agent.stateEvents ?? [])
+      if (eventInWindow(event, start, end)) record(agent.id, event.at)
     for (const segment of agent.segments) {
-      if (segment.state === 'done') {
-        record(agent.id, segment.start)
-      } else if (
-        ['working', 'blocked', 'waiting'].includes(segment.state) &&
-        segment.start <= end
-      ) {
+      if (completionInWindow(segment, start, end)) record(agent.id, segment.start)
+      else if (['working', 'blocked', 'waiting'].includes(segment.state) && segment.start <= end) {
         record(agent.id, Math.min(end, segment.end))
       }
     }
@@ -174,7 +174,7 @@ function compactGroup(agents, edges, projectByAgent, project) {
 export function orderProjectLanes(agents, messages, start, end, compact = false) {
   const groups = new Map()
   for (const agent of agents) {
-    const project = agent.projectId || '__unknown__'
+    const project = projectKey(agent)
     if (!groups.has(project)) {
       groups.set(project, [])
     }

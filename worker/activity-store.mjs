@@ -1,3 +1,6 @@
+import { projectKey, terminalKey } from '../pin-identity.mjs'
+import { segmentAt, isActiveState } from '../timeline-evidence.mjs'
+
 export const WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 const STATES = new Set(['working', 'blocked', 'waiting', 'done', 'unknown'])
 const MAX_RECORDS = 5000
@@ -104,6 +107,100 @@ function isFinishedShortTask(agent, points) {
     }
   }
   return executionMs > 0 && executionMs < SHORT_TASK_MS
+}
+
+// Optional fields can be absent on older records or on live host metadata.
+// Keep null (for example an unknown message sender) and omit undefined object
+// properties at the public snapshot boundary, including nested metadata.
+function snapshotValue(value) {
+  if (Array.isArray(value)) return value.map(snapshotValue)
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, field]) => field !== undefined)
+      .map(([key, field]) => [key, snapshotValue(field)])
+  )
+}
+
+// A displayed message can reserve at most three intervals: both lanes at the
+// plotted time and the receiver at retrieval. Even 600 messages fit in 4,000.
+function limitTimeline(agents, messages) {
+  let budget = 4000
+  if (agents.reduce((sum, a) => sum + a.segments.length, 0) <= budget) return false
+  const lanes = new Map(
+    agents.map((agent) => [agent.id, { agent, keep: new Set(), next: agent.segments.length - 1 }])
+  )
+  function reserve(id, at) {
+    const lane = lanes.get(id)
+    if (!lane || !Number.isFinite(at)) return
+    const segment = segmentAt(lane.agent.segments, at)
+    if (segment) lane.keep.add(segment)
+  }
+  for (const message of messages) {
+    reserve(message.from, message.at)
+    reserve(message.to, message.at)
+    reserve(message.to, message.deliveredAt)
+  }
+  // Keep the latest interval on every lane. Then fill equal-sized shares
+  // newest first, letting sparse lanes and reservations sit out each round.
+  for (const { agent, keep } of lanes.values()) {
+    if (agent.segments.length) keep.add(agent.segments.at(-1))
+    budget -= keep.size
+  }
+  let active = [...lanes.values()].reverse()
+  for (let share = 1; budget > 0; share++) {
+    active = active.filter(({ agent, keep }) => keep.size < agent.segments.length)
+    for (const lane of active) {
+      const { agent, keep } = lane
+      if (keep.size >= share) continue
+      while (keep.has(agent.segments[lane.next])) lane.next--
+      keep.add(agent.segments[lane.next--])
+      if (--budget === 0) break
+    }
+  }
+  for (const { agent, keep } of lanes.values()) {
+    const segments = agent.segments
+    if (segments.length === keep.size) continue
+    // Report the exact holes, and keep a short-gap display join only when
+    // its bounding working observations and the whole bridge survived.
+    agent.omittedSegments = segments.length - keep.size
+    agent.omittedRanges = []
+    agent.segments = []
+    const activityBounds = []
+    let lastWork = -1
+    let hole
+    for (const segment of segments) {
+      if (!keep.has(segment)) {
+        if (hole && hole.end === segment.start) hole.end = segment.end
+        else {
+          hole = { start: segment.start, end: segment.end }
+          agent.omittedRanges.push(hole)
+        }
+        if (isActiveState(segment.state)) {
+          if (activityBounds.at(-1) === segment.start)
+            activityBounds[activityBounds.length - 1] = segment.end
+          else activityBounds.push(segment.start, segment.end)
+        }
+        lastWork = -1
+        continue
+      }
+      hole = null
+      if (segment.state === 'working') {
+        if (lastWork >= 0) {
+          for (let i = lastWork + 1; i < agent.segments.length; i++)
+            agent.segments[i].joinedWork = true
+        }
+        lastWork = agent.segments.length
+      } else if (segment.joinedWork) {
+        delete segment.joinedWork
+      } else {
+        lastWork = -1
+      }
+      agent.segments.push(segment)
+    }
+    if (activityBounds.length) agent.omittedActivity = activityBounds
+  }
+  return true
 }
 
 export function timestamp(value) {
@@ -236,9 +333,30 @@ export class ActivityStore {
       return
     }
     const prior = this.messages.get(message.id)
-    if (prior && message.id.startsWith('public-mail:')) {
-      if (prior.to !== message.to || (prior.from && message.from && prior.from !== message.from))
-        return
+    const publicMail = message.id.startsWith('public-mail:')
+    if (
+      publicMail &&
+      (prior?.senderConflict ||
+        message.senderConflict ||
+        (prior?.from && message.from && prior.from !== message.from))
+    ) {
+      // A retained conflict survives older generations and repeated receipts. Only
+      // an observed retrieval provides a recipient or a display time in this case.
+      const checks = [prior, message].filter((row) => Number.isFinite(row?.deliveredAt))
+      const to = checks[0]?.to ?? null
+      const at = checks.length
+        ? Math.min(...checks.filter((row) => row.to === to).map((row) => row.deliveredAt))
+        : Math.min(prior?.at ?? message.at, message.at)
+      message = {
+        id: message.id,
+        senderConflict: true,
+        from: null,
+        to,
+        at,
+        ...(to && { deliveredAt: at, type: 'Mailbox input' })
+      }
+    } else if (publicMail && prior) {
+      if (prior.to !== message.to) return
       const from = prior.from ?? message.from
       const received = [prior.deliveredAt, message.deliveredAt].filter(Number.isFinite)
       // Sender observations carry the acceptance time. A receiver-only marker
@@ -255,7 +373,7 @@ export class ActivityStore {
     this.messages.set(message.id, {
       ...message,
       from: message.from === null ? null : this.agent(message.from),
-      to: this.agent(message.to),
+      to: message.to === null ? null : this.agent(message.to),
       subject: String(message.subject ?? '').slice(0, 160),
       body:
         String(message.body ?? '').length > 400
@@ -351,6 +469,15 @@ export class ActivityStore {
       needed.add(message.from)
       needed.add(message.to)
     }
+    for (const agent of this.agents.values()) {
+      if (
+        agent.parentId &&
+        agent.spawnedAt >= cutoff &&
+        agent.spawnedAt <= now &&
+        !agent.dispatchFailed
+      )
+        needed.add(agent.id)
+    }
     for (const id of needed) {
       let parent = this.agents.get(id)?.parentId
       const seen = new Set([id])
@@ -373,9 +500,15 @@ export class ActivityStore {
   }
 
   // Raw consumers retain the unfiltered view; panel/preview endpoints supply the preference.
-  snapshot(now = Date.now(), { hideShortTasks = false, attempts = [] } = {}) {
+  snapshot(
+    now = Date.now(),
+    { hideShortTasks = false, attempts = [], pinnedTerminals = [], pinnedProjects = [] } = {}
+  ) {
     this.prune(now)
     const windowStart = now - WINDOW_MS
+    const pins = new Set(pinnedTerminals)
+    const projects = new Set(pinnedProjects)
+    const headings = new Map()
     const grouped = new Map()
     for (const point of this.points.values()) {
       if (point.at > now) {
@@ -427,6 +560,9 @@ export class ActivityStore {
         }
 
         const segments = []
+        const stateEvents = []
+        let lastObserved
+        let lastObservedEnd
         let lastWorkEnd = null
         let firstGap = 0
         let displayWork = 0
@@ -436,6 +572,29 @@ export class ActivityStore {
           const next = points[index + 1]?.at ?? now
           const end = Math.min(now, next, point.until ?? next)
           const start = Math.max(windowStart, point.at)
+          // A new bounded Done interval can simply be the first poll after a gap.
+          // Use the first observed Done after an active state, even if it occupies no pixels.
+          const completion =
+            point.state === 'done' &&
+            lastObserved &&
+            lastObserved.state !== 'done' &&
+            lastObserved.at < point.at &&
+            point.at >= windowStart
+          const completionSince = completion ? lastObservedEnd : undefined
+          if (point.state !== 'unknown') {
+            if (
+              end === point.at &&
+              point.at >= windowStart &&
+              (point.state !== 'done' || completion)
+            )
+              stateEvents.push({
+                at: point.at,
+                state: point.state,
+                ...(completion && { completionSince })
+              })
+            lastObserved = point
+            lastObservedEnd = end
+          }
           // Completion is a boundary even when a point occupies zero pixels.
           if (point.state === 'done') lastWorkEnd = null
           if (point.state === 'working' && start <= end) {
@@ -447,7 +606,13 @@ export class ActivityStore {
             lastWorkEnd = end
           }
           if (end > start) {
-            segments.push({ start, end, state: point.state, source: point.source })
+            segments.push({
+              start,
+              end,
+              state: point.state,
+              ...(point.source !== undefined && { source: point.source }),
+              ...(completion && { completionSince })
+            })
           }
           if (point.state === 'working') firstGap = segments.length
           if (end < Math.min(next, now)) {
@@ -459,24 +624,33 @@ export class ActivityStore {
             })
           }
         }
-        if (hideShortTasks && displayWork < SHORT_TASK_MS && isFinishedShortTask(agent, ordered)) {
+        const member = snapshotValue({ ...agent, ...this.projectFor(agent) })
+        const key = projectKey(member)
+        if (projects.has(key)) {
+          const { hostId, projectId, projectName } = member
+          headings.set(key, snapshotValue({ hostId, projectId, projectName }))
+        }
+        const pinned = pins.has(terminalKey(agent))
+        const shortTask =
+          hideShortTasks && displayWork < SHORT_TASK_MS && isFinishedShortTask(agent, ordered)
+        if (shortTask && !pinned) {
           hiddenShortTasks++
           return null
         }
-        return { ...agent, ...this.projectFor(agent), segments }
+        return {
+          ...member,
+          ...(pinned && { pinned }),
+          segments,
+          ...(shortTask && { pinnedShortTask: true }),
+          ...(stateEvents.length && { stateEvents })
+        }
       })
       .filter(Boolean)
       .sort((a, b) => a.label.localeCompare(b.label))
-    let limited = this.limited || agents.length > 160
-    let budget = 4000
-    const visible = agents.slice(0, 160).map((agent) => {
-      if (agent.segments.length > budget) {
-        limited = true
-      }
-      const segments = budget > 0 ? agent.segments.slice(-budget) : []
-      budget -= segments.length
-      return { ...agent, segments }
-    })
+    // Reserve snapshot places for explicitly pinned identities before the normal lane cap.
+    if (agents.length > 160 && pins.size)
+      agents.sort((a, b) => Number(pins.has(terminalKey(b))) - Number(pins.has(terminalKey(a))))
+    const visible = agents.slice(0, 160)
     const ids = new Set(visible.map((agent) => agent.id))
     const messages = [...this.messages.values(), ...attempts]
       .filter(
@@ -486,15 +660,19 @@ export class ActivityStore {
           ids.has(message.to)
       )
       .sort((a, b) => a.at - b.at)
+    const shown = messages.slice(-600)
+    const trimmed = limitTimeline(visible, shown)
     return {
       now,
       windowStart,
       agents: visible,
-      messages: messages.slice(-600),
-      sources: [...this.sources.values()].slice(0, 200),
+      pinnedProjects: [...headings.values()],
+      messages: shown.map(snapshotValue),
+      sources: [...this.sources.values()].slice(0, 200).map(snapshotValue),
       collectingSince: this.collectingSince,
       hiddenShortTasks,
-      limited: limited || messages.length > 600
+      limited:
+        this.limited || trimmed || agents.length > visible.length || messages.length > shown.length
     }
   }
 

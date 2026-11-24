@@ -1,5 +1,20 @@
+import { projectKey, terminalKey } from './pin-identity.mjs'
+import { t, number, date, unit, locale, updateLocale, bindDocumentText } from './panel-i18n.mjs'
+import {
+  segmentAt,
+  completionInWindow,
+  eventInWindow,
+  overlapsOmittedActivity
+} from './timeline-evidence.mjs'
 import { DetailInputs } from './panel-inputs.mjs'
-import { activeAgents, agentName, renderActivityDetail, visibleAgents } from './panel-identity.mjs'
+import {
+  windowActivity,
+  activeAgents,
+  agentName,
+  overlapsOmittedRange,
+  renderActivityDetail,
+  visibleAgents
+} from './panel-identity.mjs'
 import { harnessIcon, harnessLabel, shortAgentId } from './panel-harness.mjs'
 import { installActivityActions, renderSources } from './panel-actions.mjs'
 import { createLaneMotion, spawnPath, messagePath } from './lane-motion.mjs'
@@ -13,15 +28,54 @@ let maxHours = 168
 const SVG = 'http://www.w3.org/2000/svg'
 const STATES = new Set(['working', 'blocked', 'waiting', 'done', 'unknown'])
 const $ = (id) => document.getElementById(id)
-const locale = window.orca?.locale || navigator.language
-const timeFormat = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' })
-const dayFormat = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' })
-const dayHourFormat = new Intl.DateTimeFormat(locale, {
+const applyDocumentText = bindDocumentText(document.body)
+function localizeDocument() {
+  applyDocumentText()
+  if ($('plugin-version').dataset.unavailable)
+    $('plugin-version').textContent = t('Version unavailable')
+  $('pause').textContent = t(
+    $('pause').getAttribute('aria-pressed') === 'true' ? 'Resume live' : 'Pause view'
+  )
+  $('zoom-min').textContent = unit(5, 'minute', true)
+  $('zoom-value').textContent = unit(24, 'hour', true)
+  $('zoom-limit').textContent = unit(7, 'day', true)
+  for (const tick of $('zoom-ticks').children) localizeTick(tick, Number(tick.dataset.hours))
+}
+updateLocale()
+localizeDocument()
+// The desktop frame serves its own integrity-checked package assets by relative URL.
+async function showVersion() {
+  try {
+    const response = await fetch('./orca-plugin.json')
+    const manifest = response.ok && (await response.json())
+    if (typeof manifest.version === 'string' && manifest.version) {
+      $('plugin-version').textContent = 'v' + manifest.version
+      return
+    }
+  } catch {
+    // The rest of the timeline remains usable when the package asset cannot be read.
+  }
+  $('plugin-version').dataset.unavailable = 'true'
+  $('plugin-version').textContent = t('Version unavailable')
+}
+void showVersion()
+const dateFormatter = (options) => ({ format: (at) => date(at, options) })
+const timeFormat = dateFormatter({ hour: '2-digit', minute: '2-digit' })
+const eventTime = dateFormatter({
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  fractionalSecondDigits: 3
+})
+const dayFormat = dateFormatter({ month: 'short', day: 'numeric' })
+const dayHourFormat = dateFormatter({
   month: 'short',
   day: 'numeric',
   hour: '2-digit'
 })
-const dateFormat = new Intl.DateTimeFormat(locale, {
+const dateFormat = dateFormatter({
   month: 'short',
   day: 'numeric',
   hour: '2-digit',
@@ -31,6 +85,8 @@ let latest = null
 let displayed = null
 let displayedHideShortTasks = null
 const preferences = await loadViewPreferences()
+$('language').value = preferences.language
+if (updateLocale(preferences.language)) localizeDocument()
 let hours = preferences.hours
 let viewEnd = null
 let paused = false
@@ -44,6 +100,7 @@ let renderedWidth = 0
 let renderedHeight = 0
 let renderedZoomWidth = 0
 let renderedAgents = []
+const laneEvidence = new Map()
 let gestureAgents = null
 let gestureTimer
 const laneMotion = createLaneMotion($('lanes'), $('chart'))
@@ -75,16 +132,12 @@ function stateOf(segment) {
 }
 
 function stateLabel(state) {
-  return state === 'unknown' ? 'Unobserved' : state[0].toUpperCase() + state.slice(1)
+  return t(state === 'unknown' ? 'Unobserved' : state[0].toUpperCase() + state.slice(1))
 }
 
 function windowLabel(value) {
-  if (value > 24 && value % 24 === 0) {
-    return `${value / 24}d`
-  }
-  return duration(value * HOUR)
-    .replace(' min', 'm')
-    .replace('h 0m', 'h')
+  if (value > 24 && value % 24 === 0) return unit(value / 24, 'day', true)
+  return duration(value * HOUR, true)
 }
 
 function zoomFraction(value) {
@@ -97,7 +150,10 @@ function renderZoom(snapshot) {
   hours = Math.min(preferences.hours, maxHours)
   $('zoom').disabled = maxHours === minHours
   $('zoom').value = String(Math.round(zoomFraction(hours) * 1000))
-  $('zoom').setAttribute('aria-valuetext', `${duration(hours * HOUR)} of observed history`)
+  $('zoom').setAttribute(
+    'aria-valuetext',
+    t('{duration} of observed history', { duration: duration(hours * HOUR) })
+  )
   $('zoom-min').textContent = windowLabel(minHours)
   $('zoom-limit').textContent = windowLabel(maxHours)
   $('zoom-value').textContent = windowLabel(hours)
@@ -120,21 +176,129 @@ function unobservedDescription(agent, segment) {
   const previous = agent.segments.findLast(
     (item) => item.end <= (segment?.start ?? Infinity) && stateOf(item) !== 'unknown'
   )
-  return `No reliable state observation covers this interval. Missing or stale logs cannot confirm continued work.${previous ? `\nLast observed: ${stateLabel(stateOf(previous))} through ${dateFormat.format(previous.end)}.` : '\nNo earlier state observation is available in this snapshot.'}`
+  const omitted = overlapsOmittedRange(
+    agent,
+    previous?.end ?? -Infinity,
+    segment?.start ?? Infinity
+  )
+  const earlier = previous
+    ? t(
+        omitted
+          ? 'Last retained observation: {state} through {time}.'
+          : 'Last observed: {state} through {time}.',
+        { state: stateLabel(stateOf(previous)), time: dateFormat.format(previous.end) }
+      )
+    : t('No earlier state observation is available in this snapshot.')
+  return (
+    t(
+      'No reliable state observation covers this interval. Missing or stale logs cannot confirm continued work.'
+    ) +
+    '\n' +
+    earlier
+  )
 }
 
-function duration(ms) {
+function evidenceInWindow(agent, start, end, hasMessages) {
+  const last = agent.segments.findLast(
+    (item) => item.end > start && item.start < end && stateOf(item) !== 'unknown'
+  )
+  const limited = overlapsOmittedRange(agent, start, end)
+  // Intervals exclude their right boundary. A confirmed completion exactly at the view end
+  // still belongs to the window even though its following interval has no visible width.
+  const boundary = agent.segments.findLast(
+    (item) => item.start === end && completionInWindow(item, start, end)
+  )
+  const event = boundary
+    ? { at: end, state: 'done' }
+    : agent.stateEvents?.findLast((event) => eventInWindow(event, start, end))
+  const showEvent = event && (!last || event.at >= last.end)
+  let label = t('Unobserved')
+  let detail = t('No state interval is available in this window.')
+  if (showEvent) {
+    const state = stateLabel(event.state)
+    label =
+      event.at === end
+        ? state
+        : t(
+            overlapsOmittedRange(agent, event.at, end) ? 'Last retained: {state}' : 'Last: {state}',
+            { state }
+          )
+    detail = t('Observed {state} at {time}.', { state, time: eventTime.format(event.at) })
+  } else if (last) {
+    const state = stateLabel(last.state)
+    label = state
+    if (last.end < end) {
+      label = t(
+        overlapsOmittedRange(agent, last.end, end) ? 'Last retained: {state}' : 'Last: {state}',
+        { state }
+      )
+    }
+    detail = t('{state} observed through {time} in this window.', {
+      state,
+      time: dateFormat.format(Math.min(last.end, end))
+    })
+  } else if (limited) {
+    label = t('History limited')
+  } else if (hasMessages) {
+    label = t('Messages only')
+    detail = t(
+      'Coordination messages are recorded in this window. No execution state interval is available here.'
+    )
+  }
+  if (limited)
+    detail +=
+      ' ' +
+      t(
+        overlapsOmittedActivity(agent, start, end)
+          ? 'Recorded activity in this window was omitted from the snapshot ({count} segments omitted across this lane).'
+          : 'Some intervals in this window were omitted from the snapshot ({count} segments omitted across this lane).',
+        { count: number(agent.omittedSegments) }
+      )
+  return { state: stateOf(showEvent ? event : last), label, detail }
+}
+
+function segmentDuration(ms) {
+  if (ms < 1000) return unit(ms, 'millisecond')
+  if (ms < 60000) return unit(ms / 1000, 'second')
+  return duration(ms)
+}
+
+function duration(ms, compact = false) {
   if (ms < 60_000) {
-    return '< 1 min'
+    return t('< 1 min')
   }
   const minutes = Math.floor(ms / 60_000)
-  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+  if (minutes < 60) return unit(minutes, 'minute', compact)
+  const hoursText = unit(Math.floor(minutes / 60), 'hour', true)
+  return compact && minutes % 60 === 0
+    ? hoursText
+    : hoursText + ' ' + unit(minutes % 60, 'minute', true)
 }
 
 function setEmpty(title, body) {
   $('empty').replaceChildren(node('strong', '', title), node('p', '', body))
   $('empty').hidden = false
   $('chart-scroll').hidden = true
+}
+
+function pinButton(field, key, name, pinned) {
+  const button = node('button', 'pin-control')
+  button.type = 'button'
+  button.dataset.pin = field
+  button.dataset.pinKey = key
+  button.dataset.key = field + ':' + key
+  button.setAttribute('aria-pressed', String(pinned))
+  const action =
+    field === 'pinnedProjects'
+      ? pinned
+        ? 'Unpin project {name}'
+        : 'Pin project {name}'
+      : pinned
+        ? 'Unpin terminal {name}'
+        : 'Pin terminal {name}'
+  button.title = (pinned ? t('Pinned') + ' · ' : '') + t(action, { name })
+  button.setAttribute('aria-label', button.title)
+  return button
 }
 
 function render() {
@@ -152,9 +316,12 @@ function render() {
     Math.max(snapshot.windowStart + hours * HOUR, viewEnd ?? snapshot.now)
   )
   const start = Math.max(snapshot.windowStart, end - hours * HOUR)
+  const inWindow = (segment) => segment.end > start && segment.start < end
+  const pins = new Set(snapshot.agents.filter((agent) => agent.pinned).map(terminalKey))
+  const activity = windowActivity(snapshot, start, end)
   const active = gestureAgents
-    ? activeAgents(snapshot, start, end)
-    : visibleAgents(snapshot, start, end, preferences.compactLanes)
+    ? activeAgents(snapshot, start, end, pins, activity)
+    : visibleAgents(snapshot, start, end, preferences.compactLanes, pins, activity)
   if (gestureAgents) {
     const placed = new Set(gestureAgents.map((agent) => agent.id))
     for (const agent of active) {
@@ -165,25 +332,48 @@ function render() {
     }
   }
   const currentAgents = new Map(snapshot.agents.map((agent) => [agent.id, agent]))
-  const agents = gestureAgents
+  const ordered = gestureAgents
     ? gestureAgents.map((agent) => currentAgents.get(agent.id) ?? agent)
     : active
+  const projectPins = new Set((snapshot.pinnedProjects ?? []).map(projectKey))
+  const groups = new Map()
+  function group(agent) {
+    const key = projectKey(agent)
+    if (!groups.has(key))
+      groups.set(key, { key, name: agent.projectName || t('Project unavailable'), agents: [] })
+    return groups.get(key)
+  }
+  for (const agent of ordered) group(agent).agents.push(agent)
+  const query = $('search').value.trim().toLocaleLowerCase(locale)
+  for (const agent of snapshot.pinnedProjects ?? []) {
+    // Keep a pinned project heading available even when all its lanes are idle.
+    if (
+      [agent.projectName, agent.projectId].some((value) =>
+        value?.toLocaleLowerCase(locale).includes(query)
+      )
+    )
+      group(agent)
+  }
+  const headings = [...groups.values()].sort(
+    (a, b) => Number(projectPins.has(b.key)) - Number(projectPins.has(a.key))
+  )
+  const positions = new Map()
+  let height = 0
+  for (const heading of headings) {
+    heading.y = height
+    height += GROUP
+    if (pins.size)
+      heading.agents.sort(
+        (a, b) => Number(pins.has(terminalKey(b))) - Number(pins.has(terminalKey(a)))
+      )
+    for (const agent of heading.agents) {
+      positions.set(agent.id, height + ROW / 2)
+      height += ROW
+    }
+  }
+  const agents = headings.flatMap((heading) => heading.agents)
   renderedAgents = agents
   const rowById = new Map(agents.map((agent, index) => [agent.id, index]))
-  const positions = new Map()
-  const headings = []
-  let height = 0
-  let previousProject
-  for (const agent of agents) {
-    const project = agent.projectId || '__unknown__'
-    if (project !== previousProject) {
-      headings.push({ y: height, name: agent.projectName || 'Project unavailable' })
-      height += GROUP
-      previousProject = project
-    }
-    positions.set(agent.id, height + ROW / 2)
-    height += ROW
-  }
   const localDate = (at) => {
     const date = new Date(at - new Date(at).getTimezoneOffset() * 60000)
     return date.toISOString().slice(0, 16)
@@ -194,14 +384,18 @@ function render() {
   if (document.activeElement !== $('range-end')) {
     $('range-end').value = localDate(end)
   }
-  const messages = snapshot.messages.filter(
-    (message) =>
-      message.at >= start &&
-      message.at <= end &&
-      (message.from === null || rowById.has(message.from)) &&
-      rowById.has(message.to)
+  const windowMessages = snapshot.messages.filter(
+    (message) => message.at >= start && message.at <= end
+  )
+  const participants = new Set(windowMessages.flatMap((message) => [message.from, message.to]))
+  const messages = windowMessages.filter(
+    (message) => (message.from === null || rowById.has(message.from)) && rowById.has(message.to)
   )
   if (selection?.agent && !rowById.has(selection.agent)) selection = null
+  if (selection?.start !== undefined) {
+    const segment = segmentAt(currentAgents.get(selection.agent)?.segments ?? [], selection.start)
+    if (segment?.start !== selection.start || !inWindow(segment)) selection = null
+  }
   if (selection?.message) {
     const visible = new Set(messages.map((item) => item.id))
     if (!visible.has(selection.message)) {
@@ -210,20 +404,37 @@ function render() {
       else selection = null
     }
   }
-  $('summary').textContent =
-    `${active.length} of ${snapshot.agents.length} agents · ${messages.length} coordination messages`
+  const agentCount = t(
+    snapshot.agents.length === 1 ? '{shown} of {total} agent' : '{shown} of {total} agents',
+    {
+      shown: number(active.length),
+      total: number(snapshot.agents.length)
+    }
+  )
+  const messageCount = t(
+    messages.length === 1 ? '{count} coordination message' : '{count} coordination messages',
+    { count: number(messages.length) }
+  )
+  $('summary').textContent = agentCount + ' · ' + messageCount
   $('period').textContent = `${dateFormat.format(start)} – ${dateFormat.format(end)}`
   renderSources(snapshot, node, dateFormat)
   $('view-empty').hidden = active.length > 0
-  if (!snapshot.agents.length) {
+  if (!snapshot.agents.length && !headings.length) {
     $('lanes').replaceChildren()
     $('chart').replaceChildren()
     $('axis').replaceChildren()
     setEmpty(
-      snapshot.hiddenShortTasks ? 'Short tasks are hidden' : 'No activity observed yet',
+      t(snapshot.hiddenShortTasks ? 'Short tasks are hidden' : 'No activity observed yet'),
       snapshot.hiddenShortTasks
-        ? `${snapshot.hiddenShortTasks} finished ${snapshot.hiddenShortTasks === 1 ? 'task has' : 'tasks have'} less than 3 minutes of reliably observed execution. Turn off Hide short tasks (< 3 min) to show them.`
-        : 'Start an Orca agent to see its activity here. Check Data sources if an existing agent is missing.'
+        ? t(
+            snapshot.hiddenShortTasks === 1
+              ? '{count} finished task has less than 3 minutes of reliably observed execution. Turn off Hide short tasks (< 3 min) to show it.'
+              : '{count} finished tasks have less than 3 minutes of reliably observed execution. Turn off Hide short tasks (< 3 min) to show them.',
+            { count: number(snapshot.hiddenShortTasks) }
+          )
+        : t(
+            'Start an Orca agent to see its activity here. Check Data sources if an existing agent is missing.'
+          )
     )
     renderDetail()
     return
@@ -238,47 +449,71 @@ function render() {
   const x = (at) => padding + ((at - start) / Math.max(1, end - start)) * (width - padding * 2)
   const center = (id) => positions.get(id)
   const labels = []
-  let lastProject
-  for (const agent of agents) {
-    const project = agent.projectId || '__unknown__'
-    if (project !== lastProject) {
-      labels.push(node('div', 'project-heading', agent.projectName || 'Project unavailable'))
-      lastProject = project
+  laneEvidence.clear()
+  for (const group of headings) {
+    const row = node('div', 'project-row')
+    row.append(node('div', 'project-heading', group.name))
+    if (group.key)
+      row.append(pinButton('pinnedProjects', group.key, group.name, projectPins.has(group.key)))
+    labels.push(row)
+    for (const agent of group.agents) {
+      const lane = node('button', 'lane')
+      lane.type = 'button'
+      lane.dataset.key = `agent:${agent.id}`
+      lane.dataset.agent = agent.id
+      const evidence = evidenceInWindow(agent, start, end, participants.has(agent.id))
+      const pinned = pins.has(terminalKey(agent))
+      if (pinned && !activity.has(agent.id)) {
+        evidence.label = t('No activity in this window')
+        evidence.detail =
+          t('This pinned terminal has no recorded activity in this window.') + ' ' + evidence.detail
+      }
+      if (agent.pinnedShortTask)
+        evidence.detail +=
+          ' ' + t('Pinned terminal with less than 3 minutes of reliably observed execution.')
+      laneEvidence.set(agent.id, evidence)
+      const label = agentName(agent)
+      const identity = `${harnessLabel(agent)} · ${shortAgentId(agent)}`
+      lane.setAttribute(
+        'aria-label',
+        t('{label}: {state}. {identity}. Inspect agent', { label, state: evidence.label, identity })
+      )
+      const status = node('span', `lane-state ${evidence.state}`, evidence.label)
+      status.title = evidence.detail
+      const meta = node('span', 'lane-meta')
+      meta.append(status, node('span', 'lane-identity', shortAgentId(agent)))
+      const heading = node('span', 'lane-heading')
+      heading.append(harnessIcon(agent), node('span', 'lane-name', label))
+      const memory = agent.memory
+      if (
+        Number.isFinite(memory?.bytes) &&
+        memory.bytes >= 0 &&
+        ['footprint', 'rss', 'working-set'].includes(memory.metric) &&
+        Number.isFinite(memory.collectedAt)
+      ) {
+        const gib = memory.bytes >= 1024 ** 3
+        const value = gib
+          ? number(memory.bytes / 1024 ** 3, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+          : number(Math.round(memory.bytes / 1024 ** 2))
+        const text = `${value} ${gib ? 'GiB' : 'MiB'}`
+        const description = t(
+          'Live terminal and child processes: {size} ({metric}), sampled {time}',
+          {
+            size: text,
+            metric: memory.metric,
+            time: new Date(memory.collectedAt).toLocaleTimeString(locale)
+          }
+        )
+        const badge = node('span', 'lane-memory', text)
+        badge.title = description
+        meta.append(badge)
+        lane.setAttribute('aria-label', `${lane.getAttribute('aria-label')}. ${description}`)
+      }
+      lane.append(heading, meta)
+      const row = node('div', 'lane-row')
+      row.append(lane, pinButton('pinnedTerminals', terminalKey(agent), label, pinned))
+      labels.push(row)
     }
-    const lane = node('button', 'lane')
-    lane.type = 'button'
-    lane.dataset.key = `agent:${agent.id}`
-    lane.dataset.agent = agent.id
-    const last = agent.segments.findLast((segment) => segment.start <= end)
-    const state = stateOf(last)
-    const label = agentName(agent)
-    const identity = `${harnessLabel(agent)} · ${shortAgentId(agent)}`
-    lane.setAttribute('aria-label', `${label}: ${stateLabel(state)}. ${identity}. Inspect agent`)
-    const status = node('span', `lane-state ${state}`, stateLabel(state))
-    const meta = node('span', 'lane-meta')
-    meta.append(status, node('span', 'lane-identity', shortAgentId(agent)))
-    const heading = node('span', 'lane-heading')
-    heading.append(harnessIcon(agent), node('span', 'lane-name', label))
-    const memory = agent.memory
-    if (
-      Number.isFinite(memory?.bytes) &&
-      memory.bytes >= 0 &&
-      ['footprint', 'rss', 'working-set'].includes(memory.metric) &&
-      Number.isFinite(memory.collectedAt)
-    ) {
-      const gib = memory.bytes >= 1024 ** 3
-      const value = gib
-        ? (memory.bytes / 1024 ** 3).toFixed(1)
-        : Math.round(memory.bytes / 1024 ** 2)
-      const text = `${value} ${gib ? 'GiB' : 'MiB'}`
-      const description = `Live terminal and child processes: ${text} (${memory.metric}), sampled ${new Date(memory.collectedAt).toLocaleTimeString()}`
-      const badge = node('span', 'lane-memory', text)
-      badge.title = description
-      meta.append(badge)
-      lane.setAttribute('aria-label', `${lane.getAttribute('aria-label')}. ${description}`)
-    }
-    lane.append(heading, meta)
-    labels.push(lane)
   }
   $('lanes').replaceChildren(...labels)
   const chart = $('chart')
@@ -288,10 +523,11 @@ function render() {
   const marker = svg('marker', {
     id: 'message-arrow',
     viewBox: '0 0 8 8',
-    refX: 7,
+    // Place the arrowhead just outside the receiving track to keep its direction visible.
+    refX: 11,
     refY: 4,
-    markerWidth: 6,
-    markerHeight: 6,
+    markerWidth: 8,
+    markerHeight: 8,
     orient: 'auto-start-reverse'
   })
   marker.append(
@@ -343,7 +579,7 @@ function render() {
     // Their labels and click details still describe the actual short transitions.
     let run
     for (const segment of agent.segments) {
-      if (segment.end <= start || segment.start >= end) continue
+      if (!inWindow(segment)) continue
       if (segment.state !== 'working' && !segment.joinedWork) {
         run = null
         continue
@@ -365,15 +601,21 @@ function render() {
       run.rect?.setAttribute('width', x(Math.min(end, segment.end)) - run.left)
     }
     agent.segments.forEach((segment, index) => {
-      if (segment.end <= start || segment.start >= end) {
+      if (!inWindow(segment)) {
         return
       }
       const left = x(Math.max(start, segment.start))
       const barWidth = Math.max(0, x(Math.min(end, segment.end)) - left)
       const state = stateOf(segment)
       const paint = segment.joinedWork ? 'working' : state
-      const key = `segment:${agent.id}:${segment.start}:${index}`
-      const label = `${agentName(agent)}: ${stateLabel(state)}, ${dateFormat.format(segment.start)} to ${timeFormat.format(segment.end)}, ${duration(segment.end - segment.start)}`
+      const key = `segment:${agent.id}:${segment.start}`
+      const label = t('{label}: {state}, {start} to {end}, {duration}', {
+        label: agentName(agent),
+        state: stateLabel(state),
+        start: dateFormat.format(segment.start),
+        end: timeFormat.format(segment.end),
+        duration: segmentDuration(segment.end - segment.start)
+      })
       const group = svg('g', {
         class: 'segment-target',
         role: 'button',
@@ -395,10 +637,10 @@ function render() {
         }),
         svg('rect', {
           x: left,
-          y: center(agent.id) - (paint === 'unknown' ? 1 : 3),
+          y: center(agent.id) - 3,
           width: barWidth,
-          height: paint === 'unknown' ? 2 : 6,
-          rx: 1,
+          height: 6,
+          rx: paint === 'unknown' ? 0 : 1,
           class: `segment ${paint}${segment.end >= end ? ' current' : ''}`
         })
       )
@@ -422,7 +664,10 @@ function render() {
       svg('path', {
         class: 'spawn',
         'marker-end': 'url(#spawn-arrow)',
-        'aria-label': `Spawn: ${agentName(agents[rowById.get(agent.parentId)])} → ${agentName(agent)}`,
+        'aria-label': t('Spawn: {from} → {to}', {
+          from: agentName(agents[rowById.get(agent.parentId)]),
+          to: agentName(agent)
+        }),
         'data-from': agent.parentId,
         'data-to': agent.id,
         'data-x': at,
@@ -445,16 +690,26 @@ function render() {
     const input = message.from === null
     const from = input ? to : center(message.from)
     const path = messagePath(at, from, to)
-    const fromName = input ? 'Mailbox input' : agentName(agents[rowById.get(message.from)])
+    const fromName = input ? t('Mailbox input') : agentName(agents[rowById.get(message.from)])
     const toName = agentName(agents[rowById.get(message.to)])
+    const observedAt = (id) =>
+      stateOf(segmentAt(currentAgents.get(id).segments, message.at)) !== 'unknown'
+    const fromObserved = !input && observedAt(message.from)
     const counts = new Map()
     for (const item of bin) counts.set(item.type, (counts.get(item.type) ?? 0) + 1)
     const mixed = counts.size > 1
     const summary =
       bin.length === 1
-        ? message.subject || message.type
-        : [...counts].map(([type, count]) => `${count} ${type}`).join(', ')
-    const label = `${fromName} to ${toName}, ${timeFormat.format(message.at)}: ${summary}`
+        ? message.subject || t(message.type || 'Coordination message')
+        : [...counts]
+            .map(([type, count]) => `${number(count)} ${t(type || 'Coordination message')}`)
+            .join(locale.startsWith('zh') || locale.startsWith('ja') ? '、' : ', ')
+    const label = t('{from} to {to}, {time}: {summary}', {
+      from: fromName,
+      to: toName,
+      time: eventTime.format(message.at),
+      summary
+    })
     const ids = bin.map((item) => item.id)
     if (selection?.message && ids.includes(selection.message)) {
       selection.key = 'message:' + message.id
@@ -473,27 +728,37 @@ function render() {
       'data-status': mixed ? 'Mixed' : message.type,
       'data-message-ids': JSON.stringify(ids)
     })
-    group.append(
-      svg('title', {}, label),
-      ...(input
-        ? [
-            svg('circle', { cx: at, cy: to, r: 7, fill: 'transparent' }),
-            svg('path', { d: `M ${at} ${to - 4} l 4 4 -4 4 -4 -4 Z`, class: 'mailbox-input' })
-          ]
-        : [
-            svg('path', { d: path, class: 'message-hit' }),
-            svg('path', { d: path, class: 'message-path', 'marker-end': 'url(#message-arrow)' }),
-            svg('circle', {
-              cx: at,
-              cy: from === to ? from - 12 : from,
-              r: 2,
-              class: 'message-dot'
-            })
-          ])
-    )
+    group.append(svg('title', {}, label))
+    if (input) {
+      group.append(
+        svg('circle', { cx: at, cy: to, r: 7, fill: 'transparent' }),
+        svg('path', { d: `M ${at} ${to - 4} l 4 4 -4 4 -4 -4 Z`, class: 'mailbox-input' })
+      )
+    } else {
+      if (!observedAt(message.to)) {
+        group.append(
+          svg('circle', {
+            cx: from === to ? at + 2 : at,
+            cy: from === to ? to + 12 : to,
+            r: 4,
+            class: 'unobserved-endpoint recipient'
+          })
+        )
+      }
+      group.append(
+        svg('path', { d: path, class: 'message-hit' }),
+        svg('path', { d: path, class: 'message-path', 'marker-end': 'url(#message-arrow)' }),
+        svg('circle', {
+          cx: at,
+          cy: from === to ? from - 12 : from,
+          r: fromObserved ? 2 : 4,
+          class: fromObserved ? 'message-dot' : 'message-dot unobserved-endpoint'
+        })
+      )
+    }
     if (bin.length > 1) {
       group.append(
-        svg('text', { x: at + 3, y: (from + to) / 2, class: 'message-count' }, String(bin.length))
+        svg('text', { x: at + 3, y: (from + to) / 2, class: 'message-count' }, number(bin.length))
       )
     }
     chart.append(group)
@@ -514,11 +779,11 @@ function renderDetail() {
     selection,
     displayed,
     node,
-    timeFormat,
-    dateFormat,
+    eventTime,
     stateOf,
     stateLabel,
-    duration,
+    laneEvidence,
+    duration: segmentDuration,
     unobservedDescription
   })
   detailInputs.select(
@@ -564,8 +829,9 @@ function inspect(target) {
 }
 
 function setConnection(state, label) {
+  $('live-status').dataset.label = label
   $('live-status').dataset.state = state
-  $('live-status').textContent = label
+  $('live-status').textContent = t(label)
 }
 
 async function refresh() {
@@ -577,13 +843,17 @@ async function refresh() {
     return
   }
   pending = true
+  if (!paused) setConnection('updating', 'Updating…')
   $('retry').disabled = true
   try {
     if (!window.orca?.plugin?.request) {
       throw new Error('Open this panel in Orca with the Agents Director plugin enabled.')
     }
     const hideShortTasks = preferences.hideShortTasks
-    const snapshot = await window.orca.plugin.request('activity.snapshot', { hideShortTasks })
+    let snapshot = await window.orca.plugin.request('activity.snapshot', {
+      hideShortTasks,
+      withOmittedActivity: true
+    })
     if (hideShortTasks !== preferences.hideShortTasks) {
       rerun = true
       return
@@ -602,6 +872,47 @@ async function refresh() {
     ) {
       throw new Error('The activity source returned an invalid snapshot.')
     }
+    if (snapshot.omissionToken) {
+      const reply = await window.orca.plugin.request('activity.omittedActivity', {
+        token: snapshot.omissionToken
+      })
+      if (reply.stale) {
+        rerun = true
+        return
+      }
+      const agents = [...snapshot.agents]
+      for (const { index, ...evidence } of reply.rows)
+        agents[index] = { ...agents[index], ...evidence }
+      snapshot = { ...snapshot, agents }
+    }
+    if (snapshot.headingVersion) {
+      let pinnedProjects = latest?.pinnedProjects
+      if (latest?.headingVersion !== snapshot.headingVersion) {
+        pinnedProjects = []
+        for (let index = 0; ; index++) {
+          const page = await window.orca.plugin.request('activity.projectHeadings', {
+            version: snapshot.headingVersion,
+            index
+          })
+          if (page.stale) {
+            rerun = true
+            return
+          }
+          pinnedProjects.push(...page.headings)
+          if (!page.more) break
+        }
+      }
+      snapshot = { ...snapshot, pinnedProjects }
+    }
+    if (snapshot.language && !snapshot.preferencesUnavailable)
+      preferences.language = snapshot.language
+    $('language').value = preferences.language
+    const localeChanged = updateLocale(preferences.language)
+    if (localeChanged) {
+      localizeDocument()
+      localizeActions()
+    }
+    updatePreferenceError(snapshot.preferencesUnavailable)
     latest = snapshot
     $('failure').hidden = true
     setConnection(paused ? 'paused' : 'live', paused ? 'View paused' : 'Live · 5s')
@@ -609,18 +920,20 @@ async function refresh() {
       displayedHideShortTasks = hideShortTasks
       displayed = latest
       render()
-    }
+    } else if (
+      displayed.pinVersion !== latest.pinVersion ||
+      displayed.headingVersion !== latest.headingVersion
+    ) {
+      displayed = { ...latest, now: displayed.now, windowStart: displayed.windowStart }
+      render()
+    } else if (localeChanged) render()
   } catch (error) {
-    $('failure').hidden = false
-    $('failure-text').textContent =
-      `${displayed ? 'Showing the last received activity. ' : ''}${error instanceof Error ? error.message : 'Could not read activity.'}`
-    setConnection('error', 'Disconnected')
-    if (!displayed) {
-      setEmpty(
-        'Activity is unavailable',
-        'Retry the connection, or check that the plugin worker is enabled.'
-      )
+    if (updateLocale(preferences.language)) {
+      localizeDocument()
+      render()
     }
+    lastError = error instanceof Error ? error.message : 'Could not read activity.'
+    renderFailure()
   } finally {
     pending = false
     $('retry').disabled = false
@@ -630,6 +943,49 @@ async function refresh() {
     }
   }
 }
+let lastError
+function renderFailure() {
+  $('failure').hidden = false
+  $('failure-text').textContent = [
+    displayed && t('Showing the last received activity.'),
+    t(lastError)
+  ]
+    .filter(Boolean)
+    .join(' ')
+  setConnection('error', 'Disconnected')
+  if (!displayed) {
+    setEmpty(
+      t('Activity is unavailable'),
+      t('Retry the connection, or check that the plugin worker is enabled.')
+    )
+  }
+}
+
+let preferenceError = null
+function updatePreferenceError(unavailable = latest?.preferencesUnavailable) {
+  const error = $('preference-error')
+  error.hidden = !preferenceError && !unavailable
+  error.textContent = error.hidden ? '' : t(preferenceError ?? 'Saved preferences are unavailable.')
+}
+
+async function changePreference(change) {
+  try {
+    const result = await window.orca.plugin.request('activity.changePreference', change)
+    preferenceError = result?.saved
+      ? null
+      : result?.reason === 'pinLimit'
+        ? 'This pin list is full. Remove a star from this list and try again.'
+        : 'Could not save this preference. Try again.'
+  } catch {
+    preferenceError = 'Could not save this preference. Try again.'
+  }
+  updatePreferenceError()
+  await refresh()
+}
+
+$('language').addEventListener('change', () => {
+  void changePreference({ field: 'language', value: $('language').value })
+})
 
 $('hide-short-tasks').setAttribute('aria-pressed', String(preferences.hideShortTasks))
 $('hide-short-tasks').addEventListener('click', () => {
@@ -645,12 +1001,19 @@ $('shorten-links').addEventListener('click', () => {
 })
 $('search').addEventListener('input', render)
 $('retry').addEventListener('click', () => void refresh())
+function localizeTick(tick, value) {
+  tick.textContent = value === 24 ? unit(1, 'day', true) : windowLabel(value)
+  tick.setAttribute(
+    'aria-label',
+    t('Set window to {duration}', { duration: duration(value * HOUR) })
+  )
+}
 for (const value of [1 / 4, 1, 6, 24, 168]) {
-  const tick = node('button', 'zoom-tick', value === 24 ? '1d' : windowLabel(value))
+  const tick = node('button', 'zoom-tick')
   tick.type = 'button'
   tick.hidden = true
   tick.dataset.hours = String(value)
-  tick.setAttribute('aria-label', `Set window to ${duration(value * HOUR)}`)
+  localizeTick(tick, value)
   tick.addEventListener('click', () => {
     preferences.set({ hours: Math.max(minHours, Math.min(value, maxHours)) })
     render()
@@ -735,7 +1098,7 @@ $('chart-scroll').addEventListener(
 )
 $('pause').addEventListener('click', () => {
   paused = !paused
-  $('pause').textContent = paused ? 'Resume live' : 'Pause view'
+  $('pause').textContent = t(paused ? 'Resume live' : 'Pause view')
   $('pause').setAttribute('aria-pressed', String(paused))
   if (!paused && latest) {
     displayed = latest
@@ -746,6 +1109,14 @@ $('pause').addEventListener('click', () => {
   render()
 })
 $('lanes').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-pin]')
+  if (button) {
+    const { pin, pinKey } = button.dataset
+    clearTimeout(gestureTimer)
+    gestureAgents = null
+    void changePreference({ field: pin, key: pinKey })
+    return
+  }
   const target = event.target.closest('[data-agent]')
   if (target) {
     inspect(target)
@@ -796,7 +1167,7 @@ const resize = new ResizeObserver(() => {
     }
   })
 })
-installActivityActions(() => displayed)
+const localizeActions = installActivityActions(() => displayed)
 resize.observe($('chart-scroll'))
 resize.observe($('zoom-ticks'))
 if (window.orca?.plugin?.on) {

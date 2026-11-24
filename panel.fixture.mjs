@@ -1,3 +1,4 @@
+import { projectKey, terminalKey } from './pin-identity.mjs'
 const HOUR = 3_600_000
 const now = Date.parse('2026-11-02T08:00:00Z')
 const ago = (hours) => now - hours * HOUR
@@ -211,4 +212,26 @@ for (const agent of snapshot.agents) {
 for (const message of snapshot.messages) {
   message.from = ids.get(message.from)
   message.to = ids.get(message.to)
+}
+
+// The static preview fixture has no recorder to project its pin membership.
+export function fixturePreferences(data, prefs) {
+  const projects = new Map()
+  for (const agent of data.agents) {
+    const key = projectKey(agent)
+    if (prefs.pinnedProjects.has(key))
+      projects.set(key, {
+        hostId: agent.hostId,
+        projectId: agent.projectId,
+        projectName: agent.projectName
+      })
+  }
+  return {
+    ...data,
+    agents: data.agents.map((agent) => ({
+      ...agent,
+      pinned: prefs.pinnedTerminals.has(terminalKey(agent))
+    })),
+    pinnedProjects: [...projects.values()]
+  }
 }

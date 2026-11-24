@@ -1,3 +1,4 @@
+import { t, number } from './panel-i18n.mjs'
 import { navigationUnavailableReason } from './navigation-identity.mjs'
 
 export function installActivityActions(getSnapshot) {
@@ -7,6 +8,7 @@ export function installActivityActions(getSnapshot) {
   const feedback = document.getElementById('navigation-status')
   const mac = navigator.userAgent.includes('Mac')
   let selectedAgent
+  let feedbackKey
   let pending = false
   let returnFocus
   const agentAt = (target) => {
@@ -19,7 +21,8 @@ export function installActivityActions(getSnapshot) {
     }
     pending = true
     feedback.hidden = false
-    feedback.textContent = 'Opening agent…'
+    feedbackKey = 'Opening agent…'
+    feedback.textContent = t(feedbackKey)
     try {
       const reason = navigationUnavailableReason(agent)
       if (reason) throw new Error(reason)
@@ -29,7 +32,8 @@ export function installActivityActions(getSnapshot) {
       }
       feedback.hidden = true
     } catch (error) {
-      feedback.textContent = error.message
+      feedbackKey = error.message
+      feedback.textContent = t(feedbackKey)
     } finally {
       pending = false
     }
@@ -39,7 +43,7 @@ export function installActivityActions(getSnapshot) {
     returnFocus = target.closest('[data-agent]') || document.activeElement
     navigate.hidden = !selectedAgent
     const reason = navigationUnavailableReason(selectedAgent)
-    navigate.textContent = reason || 'Open or resume terminal'
+    navigate.textContent = t(reason || 'Open or resume terminal')
     navigate.disabled = pending || Boolean(reason)
     menu.showPopover()
     menu.style.left = `${Math.max(4, Math.min(x, innerWidth - menu.offsetWidth - 4))}px`
@@ -114,25 +118,49 @@ export function installActivityActions(getSnapshot) {
       event.stopPropagation()
     }
   })
+  return () => {
+    if (!feedback.hidden && feedbackKey) feedback.textContent = t(feedbackKey)
+    if (selectedAgent)
+      navigate.textContent = t(
+        navigationUnavailableReason(selectedAgent) || 'Open or resume terminal'
+      )
+  }
 }
 
 export function renderSources(snapshot, node, dateFormat) {
   const $ = (id) => document.getElementById(id)
   const unavailable = snapshot.sources.filter((source) => source.status !== 'ok').length
   $('source-summary').textContent =
-    `Data sources · ${unavailable ? `${unavailable} limited or unavailable` : 'available'}`
+    `${t('Data sources')} · ${unavailable ? t('{count} limited or unavailable', { count: number(unavailable) }) : t('available')}`
   $('source-list').replaceChildren(
     ...snapshot.sources.map((source) => {
       const row = node('div', 'source')
-      const status = node('span', 'source-state', source.status)
+      const status = node('span', 'source-state', t(source.status))
       status.dataset.state = source.status
-      row.append(node('strong', '', source.name), status, node('p', '', source.detail))
+      const agentSource = source.name.startsWith('Agents · ')
+      const name = agentSource
+        ? t('Agents · {id}', { id: source.name.slice('Agents · '.length) })
+        : t(source.name)
+      const suffix = ': current agents read through the public API.'
+      const invalidList = ': Invalid agent list'
+      const detail =
+        agentSource && source.status === 'error' && source.detail?.endsWith(invalidList)
+          ? source.detail.slice(0, -invalidList.length) + ': ' + t('Invalid agent list')
+          : agentSource && source.status === 'ok' && source.detail?.endsWith(suffix)
+            ? t('{workspace}: current agents read through the public API.', {
+                workspace: source.detail.slice(0, -suffix.length)
+              })
+            : t(source.detail)
+      row.append(node('strong', '', name), status, node('p', '', detail))
       return row
     })
   )
-  $('collection-note').textContent =
-    `Collecting since ${dateFormat.format(snapshot.collectingSince)}. Only observed activity is shown; empty time is not an inferred state.`
+  $('collection-note').textContent = t(
+    'Collecting since {time}. Only observed activity is shown; empty time is not an inferred state.',
+    { time: dateFormat.format(snapshot.collectingSince) }
+  )
   $('notice').hidden = !snapshot.limited
-  $('notice').textContent =
+  $('notice').textContent = t(
     'Some activity is unavailable. Right-click → Data sources for coverage details.'
+  )
 }

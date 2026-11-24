@@ -16,12 +16,14 @@ between every workspace.
   context menu to focus a matching terminal or resume its saved session in the
   original workspace. Orca controls how and whether a session can resume.
 - **Flexible layout:** open an editor tab or sidebar panel. Time window and lane
-  order preferences persist between sessions.
+  order preferences persist between sessions. Star a project or terminal to pin it.
+  The language selector beside the live indicator supports 中文, 日本語, 한국어,
+  English, Français and Deutsch.
 
 Version 0.2.0 replaces the private-file collector with public APIs to address
 [Orca's review feedback](https://github.com/Kyino-Pan/agents-director/issues/11).
 Orca exposes live tool hooks on supported local terminals. The collector can recognize
-specific send, mailbox check and new-agent receipts there. Earlier coordination,
+specific send, question, reply, mailbox check and new-agent receipts there. Earlier coordination,
 conversation text and process memory remain unavailable. Old screenshots
 and the cover artwork illustrate the earlier collector and are not current feature
 claims. The old recorder cache and custom data-directory setting are not imported;

@@ -13,6 +13,17 @@ Settings → Plugins → Add plugin → From a Git URL. Open the Agents Director
 or create an Agents Director editor from the tab-bar + menu. New permissions must
 be approved in Orca before updating from 0.1.x.
 
+The desktop panel and custom editor read the version from their packaged
+`orca-plugin.json` and render their own translations. Version 1.4.260 documents
+`orca.locale` and relative package resources. Its command and contribution titles
+are literal manifest strings. The host’s language-pack contribution translates
+Orca’s own interface. The plugin keeps its brand and manifest fields in their
+declared form. The picker changes only Agents Director. Unknown host diagnostics,
+session names, project names and message contents retain their original text.
+[Desktop frame API and package resources](https://github.com/stablyai/orca/blob/3330a89fa30edfd154901546f368ab4d6329962c/docs/reference/plugin-authoring.md#files-and-assets)
+· [Manifest reference](https://github.com/stablyai/orca/blob/3330a89fa30edfd154901546f368ab4d6329962c/skill-guides/orca-plugin-authoring/references/manifest.md)
+· [Directory maintainers’ API requirements](https://github.com/Kyino-Pan/agents-director/issues/11)
+
 ## Timeline and controls
 
 Lanes use public session titles, harness labels and workspace/project membership.
@@ -21,12 +32,33 @@ session identity can show observed states, but cannot be resumed by this plugin.
 
 - Search by name, identity or workspace.
 - Select a lane or state for details; copy its identity from the detail panel.
+  The lane label uses state intervals in the selected window. “Last: Done” gives
+  the last observed state when coverage ends before the right edge. If later intervals
+  in the window were omitted, “Last retained: Done” identifies the last available
+  observation. “Messages only” means the window contains communication but no
+  available execution interval.
+  Select an individual gap to see its coverage.
 - Use the window slider, duration presets, From/To controls, pan or modified wheel
   to inspect a period from five minutes to seven days.
 - Pause view freezes inspection while collection continues.
 - Hide short tasks filters only reliably finished executions below three minutes.
   Incomplete history remains visible. Session summaries alone never prove a short task.
-- Sort by recent activity or choose Shorter links to group related lanes.
+- **Group related lanes** places lanes with spawn or message connections closer together.
+  Switch it off to restore recent-activity order.
+- Select **Language** beside the live status to choose Chinese, Japanese, Korean,
+  English, French or German. **Follow Orca** uses the public frame locale and then the
+  browser’s language preferences if Orca has no valid locale. Regional tags preserve local
+  number and date formatting. An unsupported Orca language falls back to English. Panel and editor share the same language preference.
+- Hover over a project or terminal name to show its star. A pinned star stays visible. Tab to the star and press Enter
+  or Space to toggle it. Pinned projects lead the list. Pinned terminals lead their own
+  project and remain searchable in idle windows. An idle pinned project keeps just its
+  heading. Unpinning restores the usual window and short-task filters.
+- Only a saved pin on an individual matching terminal exempts it from **Hide short
+  tasks**. The lane details identify short executions shown this way. Pins reserve
+  places within the existing 160-lane snapshot limit. The recorder’s retention and
+  identity limits still apply. Project pins use host and project IDs. Terminal pins
+  use host, workspace, provider and session identity, with the exact recorded lane
+  ID as a fallback when there is no public session ID.
 - Right-click → Data sources shows collection errors, truncation and coverage.
 - Layout preferences use the plugin's own storage.
 
@@ -63,6 +95,18 @@ unknown identities wait for the next public inventory. An event arriving during 
 older inventory response wins for that terminal. Event state is not extended by
 merely reading a panel snapshot.
 
+An unpinned lane qualifies for the window through working, blocked or waiting
+observations (including observed activity omitted from the plot), a plotted message endpoint or a spawn. A window containing only Done or Unobserved stays hidden, even when the completion is known. The recorder identifies a completion at the first Done
+observation after a different observed execution state on that lane. If a gap separates
+these observations, both bounds of that change must fit in the view to establish a
+completion there. A new sample
+of an already completed terminal, including after a recorder restart, starts a
+fresh coverage interval without creating a new completion. A first-ever Done
+observation lacks that transition evidence. Individual observations can qualify at
+either window boundary even when their interval has zero width. This window rule is
+independent of the full-task execution measurement. Both operate on the snapshot
+and preserve the recorded points.
+
 Every state interval is bounded by observations. Missing terminals, failed reads,
 worker downtime and poll gaps over 15 seconds stop continuity; they never imply
 continued work or completion. Session `createdAt`, `updatedAt` and `running` are
@@ -74,9 +118,18 @@ custom profile directories, copied databases or direct remote-file reads.
 
 Session history is bounded to the newest 200 sessions across workspaces, and the
 host may truncate workspace/project lists. Source details report these limits.
-The panel retains its existing budgets (160 lanes, 4,000 segments, 600 messages),
-and the recorder bounds points/messages at 5,000 each. These are coverage limits,
-not evidence that omitted sessions did not run.
+The snapshot includes up to 160 lanes, 4,000 segments across those lanes and
+600 messages. When demand exceeds 4,000 segments, the snapshot first reserves the
+existing intervals covering both endpoints at the plotted message time, the
+receiver at retrieval, and each lane's latest interval. Sparse lanes keep
+their full history when it fits. Dense lanes share the budget and fill their
+remaining places with recent intervals. For omitted segments, the worker retains the
+exact bounds of observed working, blocked or waiting time. Only windows overlapping
+those bounds qualify through omitted activity. The frame retrieves the affected
+rows’ omission metadata in a separate reply bound to that snapshot. Done intervals and gaps can still
+carry a clipping notice when another event or a pin keeps the lane visible. “History limited” appears when such
+a window contains no retained state interval. The recorder bounds
+points and messages at 5,000 each.
 
 **Other coverage limits.** There is no public coordination history feed. Conversation
 bodies, recent user inputs, process memory and private execution metadata are unavailable. The recent-input section explains that
@@ -108,33 +161,103 @@ Agents Director custom editor at five-minute zoom and `orca plugin shot`.
 - A dotted send attempt can appear while a directly addressed call is in progress.
   It expires in memory. A successful single-message receipt records acceptance.
   An ordinary mailbox check reporting that ID confirms retrieval at the receiver.
-  The arrow stays at the send receipt time. Its detail gives the retrieval time.
+  The arrow stays at the send receipt time. Message details show both lane states
+  at that time and the receiver's state at retrieval. A larger open circle marks
+  an endpoint without an observed state. Each horizontal bar shows its measured
+  duration, even below one pixel. Zoom in to inspect a short interval or select
+  its hit target for the exact duration. Grouped arrows use the first message's
+  position. Select a group member to inspect its own times and observations.
   A diamond denotes a confirmed mailbox input when the sender is unobserved.
-- New-terminal JSON receipts from `agent launch`, `worktree create --agent` and ready `orchestration worker-start`
-  receipts can supply a child handle. A solid curve requires its first observed
-  public session identity and a public session creation time at or after the
-  launch began. An attached existing worker can establish a dispatch address.
+- Terminal launch receipts from `agent launch --json`, `worktree create --agent --json`
+  and a ready `orchestration worker-start` can supply a child handle. Worker starts
+  support JSON and the default concise receipt with explicit `mode=terminal`.
+  A solid curve requires the first observed public session identity and a public
+  session creation time at or after launch began. Worker starts accept
+  `--spec`, `--spec-file` and `--task`,
+  including a task title and a base branch for a new worktree. An attached
+  existing terminal (`--terminal`) can establish a dispatch address.
   It cannot create a parent relationship. `agent resume` is excluded.
 - Sender and receiver identities come from the live terminal inventory and status
   changes. An observed ready dispatch can resolve `dispatch:…` to the same live
   terminal session. For a bot, run, implicit mailbox or unmapped dispatch, a matching
   send and receiver check ID can join the two observed terminals. Names, task titles
-  and time proximity never supply an endpoint. Native chat and bot Home Chat have
-  no local terminal tool observation on this API. A send to such a chat usually
-  leaves no arrow. Alias and attached-dispatch cases have regression coverage.
-- Parsing accepts one direct literal `orca` command, plain send receipts or JSON,
-  and ordinary check text (first message) or JSON (up to 200). Compound shells,
-  redirects, substitutions, failed calls, cross-server sends, replay commands,
-  ambiguous ownership and group sends are excluded. Both tool phases must have
+  and time proximity never supply an endpoint. A send into native chat or bot
+  Home Chat without a matching public terminal receipt leaves the recipient
+  unresolved. Alias and attached-dispatch cases have regression coverage.
+- A direct `ask --question ... --json` with a pending message ID or a successful
+  `reply --id ... --body/--body-file ...` supplies the sender and acceptance time.
+  A reply uses its newly returned ID. The question can be missing. Only a consuming
+  check for the returned ID supplies the recipient and retrieval time. Until then
+  these receipts stay in memory. A run-scoped check requires an explicit terminal
+  matching the hook's own terminal.
+- Parsing accepts a direct `orca` or `"$ORCA_CLI_BIN_DIR/orca"` command, plain send/reply receipts or JSON,
+  concise worker-start receipts, and ordinary check text (first message) or JSON
+  (up to 200). Compound shells, redirects, substitutions, failed calls,
+  cross-server sends, replay commands, ambiguous ownership and group sends are
+  excluded. Both tool phases must have
   matching call and terminal IDs. An unresolved receipt stays in memory for up
   to two minutes, with 512 entries per pending collection. A direct accepted
   arrow can be confirmed later while retained in the seven-day cache.
+- If two sessions report successful sends with the same message ID, the recorder
+  removes the sender and keeps a conflict flag on that ID within the message
+  cache's existing retention and size limits. A verified retrieval keeps its
+  receiver and check time. The panel shows the receiver-only diamond after that
+  check, including after a cache reload.
 - A tool hook is available on supported local terminal agents while the plugin
   runs. A command invoked in a plain shell, a native chat or on SSH/WSL does not
   give the plugin the same hook pair. For those surfaces, broader coverage needs
   a public event that carries a message ID, both stable session identities and
   the acceptance or delivery stage.
 
+### Local terminal reproduction
+
+On Orca 1.4.265 and Codex 0.171.0, a disposable desktop loaded the baseline
+(`df03861`) and candidate collectors together. Two real terminal sessions
+exercised two dispatches in the same Run. To reproduce in a test profile, use
+the coordinator and worker's own terminal tools for each exchange.
+
+1. From the coordinator terminal run `"$ORCA_CLI_BIN_DIR/orca" orchestration worker-start --spec-file <fixture> --task-title first --worktree new-child --name <name> --base-branch main --agent codex --json`.
+2. Have the worker ask one question using `orca orchestration ask --question <text> --json`.
+   Consume it in the coordinator with the supplied `check --run <run> --terminal <own-terminal>`.
+   Reply using `reply --id <question-id> --body-file <fixture> --json`.
+   Have the worker consume the reply and send its normal `worker_done`. Consume the completion.
+3. Create another task with `task-create --spec-file <fixture> --task-title second --json`.
+   Attach it with `worker-start --task <id> --terminal <same-worker-terminal> --json`.
+   Repeat the exchange using plain `reply --id <question-id> --body <text>`.
+4. Compare `activity.snapshot` with `hideShortTasks: false` on both collectors.
+   Count the unique IDs from the Run and two Dispatch inboxes. A message is
+   missing when its ID has no snapshot row. Count parent links separately.
+
+| Observed in the same two dispatches   | Baseline | Candidate |
+| ------------------------------------- | -------: | --------: |
+| Parent links for one fresh session    |        0 |         1 |
+| Additional parent links on attachment |        0 |         0 |
+| Messages with both session endpoints  |        0 |         6 |
+| Receiver-only messages                |        2 |         0 |
+| Missing messages out of six           |        4 |         0 |
+
+Both questions and both completions went from worker to coordinator. Both replies
+went in the reverse direction. Each reply had a new ID that matched the worker's
+check. The observed acceptance-to-retrieval intervals spanned 5.0–7.4 seconds.
+The CLI fenced a run-scoped consuming check from a different bound terminal and
+from an unbound terminal. The bound caller then retrieved the waiting message.
+The final parser also rejects an explicit non-terminal launch mode. Replaying
+the two captured terminal-mode receipts and six message IDs with the final
+guards produced the same endpoints and stages. A separate native repeat reached
+`start_unknown` before any exchange and produced no parent link. It contributes
+no successful dispatches or messages to the table.
+
+In this macOS terminal profile `"$ORCA_CLI_COMMAND" --version` failed, while
+`"$ORCA_CLI_BIN_DIR/orca"` ran the bundled CLI. A nested `sh -c` send returned
+a real message ID and the outer shell hook supplied no direct send evidence.
+`worker-start --item` was refused in an ordinary terminal. The option belongs
+to a bot's own chat. These tests measured local terminal sessions only. The
+availability of terminal hooks for a different client, or the cause of a
+receiver-only row in an existing installation, cannot be inferred from these counts.
+
+### Working intervals
+
+Working bars use bamboo green in both host themes.
 The timeline joins working observations on the same lane when the gap from one
 end to the next start is strictly below 30,000 ms. Chains can include short
 waiting, blocked and unknown intervals. A completion ends a chain, including

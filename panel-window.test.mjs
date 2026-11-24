@@ -195,7 +195,7 @@ test('window size and sort mode survive a reopened frame and short source histor
   try {
     await first.page.getByRole('slider', { name: 'Window' }).focus()
     await first.page.keyboard.press('End')
-    await first.page.getByRole('button', { name: 'Shorter links' }).click()
+    await first.page.getByRole('button', { name: 'Group related lanes' }).click()
     await first.page.waitForFunction(
       async () =>
         (await window.orca.storage.get('view:window-hours')) === 168 &&
