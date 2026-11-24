@@ -171,6 +171,20 @@ export default {
     'Orca에서 원래 작업 공간을 더 이상 사용할 수 없습니다.',
   'More than one terminal owns this session; choose it in Orca.':
     '여러 터미널이 이 세션을 사용합니다. Orca에서 선택하세요.',
+  'Orca has not provided a terminal for this live session.':
+    'Orca에서 이 실행 중인 세션의 터미널을 제공하지 않았습니다.',
+  'Orca could not verify the complete agent inventory. Choose this session in Orca.':
+    'Orca가 전체 에이전트 목록을 확인하지 못했습니다. Orca에서 이 세션을 선택하세요.',
+  'Orca cannot identify the original workspace for this history-only session. Choose it in Orca.':
+    'Orca가 이 기록 세션의 원래 작업 공간을 식별할 수 없습니다. Orca에서 선택하세요.',
+  'The original workspace now belongs to a different host. Open it in Orca.':
+    '원래 작업 공간이 다른 호스트에 속해 있습니다. Orca에서 여세요.',
+  'This session is running in another workspace; choose it in Orca.':
+    '이 세션은 다른 작업 공간에서 실행 중입니다. Orca에서 선택하세요.',
+  'Orca did not list this terminal in its original workspace. Open it in Orca.':
+    'Orca가 원래 작업 공간에 이 터미널을 나열하지 않았습니다. Orca에서 여세요.',
+  'The terminal has conflicting public session identities; choose it in Orca.':
+    '이 터미널의 공개 세션 정보가 충돌합니다. Orca에서 터미널을 선택하세요.',
   'This session is not available in the public history for its original workspace.':
     '원래 작업 공간의 공개 기록에 이 세션이 없습니다.',
   'Orca did not return a terminal for this session.':

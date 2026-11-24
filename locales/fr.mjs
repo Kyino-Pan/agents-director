@@ -174,6 +174,20 @@ export default {
     'L’espace de travail d’origine n’est plus disponible dans Orca.',
   'More than one terminal owns this session; choose it in Orca.':
     'Plusieurs terminaux utilisent cette session. Sélectionnez le terminal dans Orca.',
+  'Orca has not provided a terminal for this live session.':
+    'Orca n’a pas fourni de terminal pour cette session en cours.',
+  'Orca could not verify the complete agent inventory. Choose this session in Orca.':
+    'Orca n’a pas pu vérifier la liste complète des agents. Sélectionnez cette session dans Orca.',
+  'Orca cannot identify the original workspace for this history-only session. Choose it in Orca.':
+    'Orca ne peut pas identifier l’espace de travail d’origine de cette session historique. Sélectionnez-la dans Orca.',
+  'The original workspace now belongs to a different host. Open it in Orca.':
+    'L’espace de travail d’origine appartient désormais à un autre hôte. Ouvrez-le dans Orca.',
+  'This session is running in another workspace; choose it in Orca.':
+    'Cette session est active dans un autre espace de travail. Sélectionnez-la dans Orca.',
+  'Orca did not list this terminal in its original workspace. Open it in Orca.':
+    'Orca n’a pas répertorié ce terminal dans son espace de travail d’origine. Ouvrez-le dans Orca.',
+  'The terminal has conflicting public session identities; choose it in Orca.':
+    'Les identités publiques de session de ce terminal sont contradictoires. Sélectionnez le terminal dans Orca.',
   'This session is not available in the public history for its original workspace.':
     'Cette session est absente de l’historique public de son espace de travail d’origine.',
   'Orca did not return a terminal for this session.':
