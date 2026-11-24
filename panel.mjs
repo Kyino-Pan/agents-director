@@ -829,9 +829,18 @@ function inspect(target) {
 }
 
 function setConnection(state, label) {
-  $('live-status').dataset.label = label
-  $('live-status').dataset.state = state
-  $('live-status').textContent = t(label)
+  const status = $('live-status')
+  const text = t(label)
+  if (status.dataset.state === state && status.textContent === text) return
+  status.dataset.label = label
+  status.dataset.state = state
+  status.textContent = text
+}
+
+function showViewStatus() {
+  if (paused) setConnection('paused', 'View paused')
+  else if (latest) setConnection('live', 'Live · 5s')
+  else setConnection('updating', 'Updating…')
 }
 
 async function refresh() {
@@ -843,7 +852,6 @@ async function refresh() {
     return
   }
   pending = true
-  if (!paused) setConnection('updating', 'Updating…')
   $('retry').disabled = true
   try {
     if (!window.orca?.plugin?.request) {
@@ -915,7 +923,7 @@ async function refresh() {
     updatePreferenceError(snapshot.preferencesUnavailable)
     latest = snapshot
     $('failure').hidden = true
-    setConnection(paused ? 'paused' : 'live', paused ? 'View paused' : 'Live · 5s')
+    showViewStatus()
     if (!paused || !displayed || displayedHideShortTasks !== hideShortTasks) {
       displayedHideShortTasks = hideShortTasks
       displayed = latest
@@ -1104,7 +1112,7 @@ $('pause').addEventListener('click', () => {
     displayed = latest
   }
   if ($('failure').hidden) {
-    setConnection(paused ? 'paused' : 'live', paused ? 'View paused' : 'Live · 5s')
+    showViewStatus()
   }
   render()
 })
@@ -1188,4 +1196,5 @@ window.addEventListener(
   },
   { once: true }
 )
+showViewStatus()
 void refresh()

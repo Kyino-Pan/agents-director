@@ -215,6 +215,53 @@ test('manual language survives reopen and preserves a paused time window, search
   }
 })
 
+test('background refreshes keep the live label and language control in place', async () => {
+  for (const width of [320, 960]) {
+    const { page } = await pageFor({ width, hostLocale: 'zh-CN' })
+    try {
+      await page.locator('#live-status[data-state="live"]').waitFor()
+      const live = await page.locator('#live-status').innerText()
+      const language = page.locator('#language')
+      const before = await language.boundingBox()
+      const during = await page.evaluate(() => {
+        const status = document.getElementById('live-status')
+        window.liveMutations = 0
+        new MutationObserver((records) => {
+          window.liveMutations += records.length
+        }).observe(status, {
+          attributes: true,
+          childList: true,
+          subtree: true,
+          characterData: true
+        })
+        window.notifyActivity()
+        window.notifyActivity()
+        return status.textContent
+      })
+      assert.equal(during, live)
+      await page.waitForFunction(
+        () => window.snapshotRequests.length >= 3 && !document.getElementById('retry').disabled
+      )
+      assert.equal(await page.evaluate(() => window.liveMutations), 0)
+      assert.deepEqual(await language.boundingBox(), before)
+
+      await page.evaluate(() => {
+        window.testFail = true
+        window.notifyActivity()
+      })
+      await page.locator('#live-status[data-state="error"]').waitFor()
+      await page.evaluate(() => {
+        window.testFail = false
+      })
+      await page.locator('#retry').click()
+      await page.locator('#live-status[data-state="live"]').waitFor()
+      assert.equal(await page.locator('#live-status').innerText(), live)
+    } finally {
+      await page.close()
+    }
+  }
+})
+
 test('updating and paused status stay readable; missing host falls back to browser then English', async () => {
   for (const [hostLocale, browserLocale, lang] of [
     [null, 'fr-CA', 'fr'],
