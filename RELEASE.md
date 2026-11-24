@@ -18,12 +18,18 @@ Requires Orca **>=1.4.260 / Host API 1.10**.
 - Resolve a verified new terminal launch's creation time through its public
   workspace history when the global history list misses it. Keep both spawn
   endpoints together within the remaining lane budget, including idle endpoints.
+- Restore previously observed Claude Code sessions in their original workspace
+  when public history attributes them to another local workspace for the same
+  folder. Recovery checks ownership across those aliases and verifies the returned
+  terminal before focus; ambiguous or incomplete ownership is reported.
 - Keep the live label steady during background refreshes, and use pushpin icons
   for pinned projects and terminals.
 
-The public APIs, requested permissions and engine minimum are unchanged from
-v0.2.2. Collection remains limited to publicly observed states and verified local
-terminal tool receipts. Missing execution history, native-chat/remote coordination,
+Requested permissions and the engine minimum are unchanged from v0.2.2.
+Navigation now checks the returned terminal through the public `terminal.list`;
+Orca's resume and focus policies still apply. Collection remains limited to publicly
+observed states and verified local terminal tool receipts. Missing execution
+history, native-chat/remote coordination,
 conversation bodies and per-terminal memory are not reconstructed. No directory
 listing or maintainer endorsement is implied; [review issue #11](https://github.com/Kyino-Pan/agents-director/issues/11)
 remains open.

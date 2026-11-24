@@ -52,14 +52,25 @@ function fixture() {
       if (f.fail === method) throw new Error('Unavailable')
       switch (method) {
         case 'workspace.list':
-          return { workspaces: structuredClone(f.workspaces), truncated: false }
+          return {
+            workspaces: structuredClone(f.workspaces),
+            truncated: f.workspaceTruncated || false
+          }
         case 'project.list':
           return {
             projects: [{ id: 'p', name: 'Public project', hostId: 'local' }],
             truncated: false
           }
         case 'agents.list':
-          return { agents: structuredClone(f.rows) }
+          return { agents: structuredClone(f.rowsByWorkspace?.[params.workspaceId] ?? f.rows) }
+        case 'terminal.list':
+          return {
+            terminals: f.terminals ?? [
+              ...f.rows.filter((row) => row.terminalId).map((row) => ({ id: row.terminalId })),
+              { id: 'resumed' }
+            ],
+            truncated: false
+          }
         case 'agent.listSessions':
           return { sessions: structuredClone(f.sessions), truncated: f.truncated || false }
         case 'agent.resume':
@@ -347,6 +358,191 @@ test('closed sessions resume through the public API with exact original identity
     ]
   )
   assert.deepEqual(f.calls.at(-1), { method: 'terminal.focus', params: { terminalId: 'resumed' } })
+})
+
+test('navigation refuses conflicting terminal identities and unaddressable live sessions without resuming', async () => {
+  for (const mode of ['same-provider', 'other-provider', 'duplicate-row', 'no-terminal']) {
+    const f = fixture()
+    f.rows = [{ ...row, agent: 'claude' }]
+    await f.collector.scan()
+    if (mode === 'no-terminal') f.rows[0].terminalId = null
+    else
+      f.rows.push({
+        ...f.rows[0],
+        agent: mode === 'other-provider' ? 'codex' : 'claude',
+        sessionId: mode === 'duplicate-row' ? row.sessionId : 'different-session'
+      })
+    await assert.rejects(
+      f.navigate({ agentId: f.agent().id }),
+      mode === 'no-terminal'
+        ? /not provided a terminal for this live session/
+        : /conflicting public session identities|More than one terminal/,
+      mode
+    )
+    assert.equal(
+      f.calls.some((c) => c.method === 'agent.resume' || c.method === 'terminal.focus'),
+      false,
+      mode
+    )
+  }
+})
+
+test('Claude navigation uses the full identity in the original workspace, never a title or short ID', async () => {
+  const f = fixture()
+  const sessionId = '11111111-2222-4333-8444-5555aabbccdd'
+  f.rows = [{ ...row, agent: 'claude', sessionId, title: 'Shared title' }]
+  f.sessions = []
+  await f.collector.scan()
+  const agent = [...f.store.agents.values()].find((a) => a.sessionId === sessionId)
+  const original = f.host.call
+  f.host.call = (method, params) => {
+    if (method === 'agents.list') {
+      assert.equal(params.workspaceId, workspace.id)
+      return Promise.resolve({
+        agents: [
+          { ...row, agent: 'codex', sessionId, terminalId: 'other-provider' },
+          { ...row, agent: 'claude', sessionId: 'different-aabbccdd', terminalId: 'same-suffix' },
+          { ...row, agent: 'claude', sessionId, terminalId: 'correct', title: 'New title' }
+        ]
+      })
+    }
+    if (method === 'terminal.list') return Promise.resolve({ terminals: [{ id: 'correct' }] })
+    return original(method, params)
+  }
+  assert.equal((await f.navigate({ agentId: agent.id })).navigated, true)
+  assert.deepEqual(f.calls.at(-1), { method: 'terminal.focus', params: { terminalId: 'correct' } })
+  f.workspaces = [{ ...workspace, id: 'another-workspace', hostId: 'runtime:other' }]
+  f.calls.length = 0
+  await assert.rejects(f.navigate({ agentId: agent.id }), /original workspace is no longer/)
+  assert.equal(
+    f.calls.some((c) => c.method === 'terminal.focus' || c.method === 'agent.resume'),
+    false
+  )
+})
+
+function aliasFixture() {
+  const f = fixture()
+  const alias = { ...workspace, id: 'same-local-folder', hostId: null }
+  f.workspaces = [workspace, alias]
+  f.rows = [{ ...row, agent: 'claude' }]
+  f.rowsByWorkspace = { [workspace.id]: f.rows, [alias.id]: [] }
+  f.sessions = [{ ...saved, agent: 'claude', workspaceId: alias.id }]
+  return { f, alias }
+}
+
+test('a previously observed Claude session can resume in its original workspace when history chose a local folder alias', async () => {
+  const { f, alias } = aliasFixture()
+  await f.collector.scan()
+  assert.equal(f.agent().workspace, workspace.id)
+  f.rowsByWorkspace[workspace.id] = []
+  f.calls.length = 0
+  assert.deepEqual(await f.navigate({ agentId: f.agent().id }), { navigated: true, started: true })
+  assert.ok(f.calls.some((c) => c.method === 'agent.listSessions' && !c.params.workspaceId))
+  assert.ok(f.calls.some((c) => c.method === 'agents.list' && c.params.workspaceId === alias.id))
+  assert.deepEqual(f.calls.find((c) => c.method === 'agent.resume').params, {
+    workspaceId: workspace.id,
+    agent: 'claude',
+    sessionId: row.sessionId
+  })
+  assert.deepEqual(f.calls.at(-2), {
+    method: 'terminal.list',
+    params: { workspaceId: workspace.id }
+  })
+  assert.deepEqual(f.calls.at(-1), { method: 'terminal.focus', params: { terminalId: 'resumed' } })
+})
+
+test('alias history never overrides missing origin evidence, host/path differences, duplicate IDs or a live owner elsewhere', async () => {
+  for (const mode of [
+    'history-only',
+    'history-only-with-scoped-history',
+    'different-path',
+    'remote-alias',
+    'changed-host',
+    'unknown-workspace',
+    'wrong-provider',
+    'wrong-session',
+    'wrong-history-host',
+    'duplicate-history',
+    'truncated-workspaces',
+    'live-alias',
+    'full-alias-inventory',
+    'unreadable-alias'
+  ]) {
+    const { f, alias } = aliasFixture()
+    await f.collector.scan()
+    f.rowsByWorkspace[workspace.id] = []
+    if (mode === 'history-only') delete f.agent().terminalHandle
+    if (mode === 'history-only-with-scoped-history') {
+      delete f.agent().terminalHandle
+      f.sessions[0].workspaceId = workspace.id
+    }
+    if (mode === 'different-path') alias.path = '/another-folder'
+    if (mode === 'remote-alias') alias.hostId = 'runtime:other'
+    if (mode === 'changed-host') f.workspaces[0] = { ...workspace, hostId: 'runtime:other' }
+    if (mode === 'unknown-workspace') f.sessions[0].workspaceId = 'missing'
+    if (mode === 'wrong-provider') f.sessions[0].agent = 'codex'
+    if (mode === 'wrong-session') f.sessions[0].sessionId = 'same-title-different-id'
+    if (mode === 'wrong-history-host') f.sessions[0].hostId = 'runtime:other'
+    if (mode === 'duplicate-history') f.sessions.push({ ...f.sessions[0] })
+    if (mode === 'truncated-workspaces') f.workspaceTruncated = true
+    if (mode === 'live-alias')
+      f.rowsByWorkspace[alias.id] = [{ ...f.rows[0], terminalId: 'elsewhere' }]
+    if (mode === 'full-alias-inventory')
+      f.rowsByWorkspace[alias.id] = Array.from({ length: 50 }, (_, i) => ({
+        ...row,
+        sessionId: 'other-' + i,
+        terminalId: 'other-' + i
+      }))
+    if (mode === 'unreadable-alias') {
+      const call = f.host.call
+      f.host.call = (method, params) => {
+        if (method === 'agents.list' && params.workspaceId === alias.id)
+          throw new Error('Unavailable')
+        return call(method, params)
+      }
+    }
+    f.calls.length = 0
+    await assert.rejects(f.navigate({ agentId: f.agent().id }), undefined, mode)
+    assert.equal(
+      f.calls.some((c) => c.method === 'agent.resume' || c.method === 'terminal.focus'),
+      false,
+      mode
+    )
+  }
+})
+
+test('history-only sessions in unique workspaces remain resumable, but a capped live inventory cannot prove absence', async () => {
+  const f = fixture()
+  f.rows = []
+  await f.collector.scan()
+  assert.equal(f.agent().terminalHandle, undefined)
+  assert.deepEqual(await f.navigate({ agentId: f.agent().id }), { navigated: true, started: true })
+  f.rows = Array.from({ length: 50 }, (_, i) => ({ ...row, sessionId: 'other-' + i }))
+  f.calls.length = 0
+  await assert.rejects(f.navigate({ agentId: f.agent().id }), /complete agent inventory/)
+  assert.equal(
+    f.calls.some((c) => c.method === 'agent.resume' || c.method === 'terminal.focus'),
+    false
+  )
+})
+
+test('a resumed orphan, duplicate address or terminal outside the original workspace is never focused', async () => {
+  for (const terminals of [
+    [],
+    [{ id: 'wrong-workspace-terminal' }],
+    [{ id: 'resumed' }, { id: 'resumed' }]
+  ]) {
+    const f = fixture()
+    await f.collector.scan()
+    f.rows = []
+    f.terminals = terminals
+    await assert.rejects(f.navigate({ agentId: f.agent().id }), /did not list this terminal/)
+    assert.equal(f.calls.filter((c) => c.method === 'agent.resume').length, 1)
+    assert.equal(
+      f.calls.some((c) => c.method === 'terminal.focus'),
+      false
+    )
+  }
 })
 
 test('missing workspace/history, ambiguous ownership and host denials never trigger fallback launches', async () => {
