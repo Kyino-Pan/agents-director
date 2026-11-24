@@ -219,8 +219,11 @@ test('a trackpad burst coalesces viewport requests and delivers its final bounds
         )
     })
     await page.waitForFunction(
-      (end) => document.querySelector('#range-end').value === end,
-      minute(NOW - 60000)
+      (end) =>
+        window.snapshotRequests.at(-1).view.end === end &&
+        document.querySelector('.lane-name').textContent ===
+          'sample-' + window.snapshotRequests.length,
+      NOW - 60000
     )
     assert.equal(f.inputs.at(-1).view.end, NOW - 60000)
     assert.ok(f.inputs.length <= 2)
@@ -252,12 +255,237 @@ test('pin updates during pause do not advance the anchor used by subsequent pann
       )
     )
     await page.waitForFunction(
-      (end) => document.querySelector('#range-end').value === end,
-      minute(NOW - 500)
+      (end) =>
+        window.snapshotRequests.at(-1).view.end === end &&
+        document.querySelector('.lane-name').textContent ===
+          'sample-' + window.snapshotRequests.length,
+      NOW - 500
     )
     assert.equal(f.inputs.at(-1).view.end, NOW - 500)
     assert.deepEqual(errors, [])
   } finally {
     await page.close()
+  }
+})
+
+test('each gesture frame moves retained observations before a delayed viewport reply', async (t) => {
+  for (const width of [360, 1280]) {
+    for (const paused of [false, true]) {
+      const f = fixture()
+      f.store.point('blocked', 'a', NOW - 180000, 'blocked', 'live', NOW - 150000)
+      f.store.point('resumed', 'a', NOW - 150000, 'working', 'live', NOW)
+      const { page, errors } = await pageFor({
+        width,
+        getSnapshot: f.getSnapshot,
+        preferences: new Map([['view:window-hours', 1 / 12]])
+      })
+      let release
+      try {
+        await page.locator('.segment.blocked').waitFor()
+        if (paused) await page.locator('#pause').click()
+        // Hold a real refresh across the gesture, then return an obsolete plot.
+        const entered = new Promise((resolve) =>
+          f.hold(async (result) => {
+            result.agents[0].label = 'obsolete-gesture'
+            resolve()
+            await new Promise((r) => (release = r))
+          })
+        )
+        await page.evaluate(() => window.notifyActivity())
+        await entered
+        const frames = await page.evaluate(async () => {
+          const chart = document.querySelector('#chart-scroll')
+          const marker = () => document.querySelector('.segment.blocked').getBoundingClientRect().x
+          const width = document.querySelector('#plot').clientWidth - 56
+          const frames = [{ x: marker(), delta: 0, width }]
+          window.gestureSamples = []
+          window.samplingGesture = true
+          window.gestureComplete = false
+          const sample = (at) => {
+            if (!window.samplingGesture) return
+            window.gestureSamples.push({
+              at,
+              x: document.querySelector('.segment.blocked')?.getBoundingClientRect().x ?? null,
+              complete: window.gestureComplete
+            })
+            requestAnimationFrame(sample)
+          }
+          requestAnimationFrame(sample)
+          let total = 0
+          for (const delta of [
+            ...Array(12).fill(-0.5),
+            ...Array(12).fill(-4),
+            ...Array(12).fill(2)
+          ]) {
+            total += delta
+            chart.dispatchEvent(new WheelEvent('wheel', { deltaX: delta, cancelable: true }))
+            await new Promise(requestAnimationFrame)
+            await new Promise(requestAnimationFrame)
+            frames.push({ x: marker(), delta: total, width })
+          }
+          window.gestureComplete = true
+          return frames
+        })
+        for (const frame of frames) {
+          const expected = frames[0].x - (frame.delta / 600) * frame.width
+          assert.ok(
+            Math.abs(frame.x - expected) < 0.05,
+            JSON.stringify({ width, paused, frame, expected })
+          )
+        }
+        const finalX = frames.at(-1).x
+        release()
+        await page.waitForFunction(() => {
+          const requests = window.snapshotRequests
+          return document.querySelector('.lane-name').textContent === 'sample-' + requests.length
+        })
+        const result = await page.evaluate(async () => {
+          await new Promise(requestAnimationFrame)
+          await new Promise(requestAnimationFrame)
+          window.samplingGesture = false
+          return {
+            x: document.querySelector('.segment.blocked').getBoundingClientRect().x,
+            failure: document.querySelector('#failure').hidden,
+            labels: [...document.querySelectorAll('.lane-name')].map((node) => node.textContent),
+            samples: window.gestureSamples
+          }
+        })
+        assert.ok(Math.abs(result.x - finalX) < 0.05)
+        assert.equal(f.inputs.at(-1).view.end, NOW - 15000)
+        assert.equal(result.failure, true)
+        assert.ok(!result.labels.includes('obsolete-gesture'))
+        assert.ok(result.samples.every((sample) => sample.x !== null))
+        assert.ok(
+          result.samples
+            .filter((sample) => sample.complete)
+            .every((sample) => Math.abs(sample.x - finalX) < 0.05)
+        )
+        const intervals = result.samples
+          .slice(1)
+          .map((sample, index) => sample.at - result.samples[index].at)
+          .sort((a, b) => a - b)
+        t.diagnostic(
+          JSON.stringify({
+            width,
+            paused,
+            observedFrameMs: intervals[Math.floor(intervals.length / 2)]
+          })
+        )
+        assert.deepEqual(errors, [])
+      } finally {
+        release?.()
+        await page.close()
+      }
+    }
+  }
+})
+
+test('scroll plots stay within 60 updates per second at simulated display rates', async (t) => {
+  for (const rate of [60, 120, 144, 240]) {
+    const f = fixture()
+    f.store.point('blocked', 'a', NOW - 180000, 'blocked', 'live', NOW - 150000)
+    f.store.point('resumed', 'a', NOW - 150000, 'working', 'live', NOW)
+    const { page, errors } = await pageFor({
+      getSnapshot: f.getSnapshot,
+      preferences: new Map([['view:window-hours', 1 / 12]])
+    })
+    let release
+    try {
+      await page.locator('.segment.blocked').waitFor()
+      const entered = new Promise((resolve) =>
+        f.hold(async () => {
+          resolve()
+          await new Promise((r) => (release = r))
+        })
+      )
+      await page.evaluate(() => window.notifyActivity())
+      await entered
+      await page.evaluate((rate) => {
+        // Simulate only the display clock. Count actual SVG replacements and
+        // measured marker positions, never wheel events or empty RAF callbacks.
+        const callbacks = new Map()
+        let id = 100000
+        window.requestAnimationFrame = (callback) => {
+          callbacks.set(++id, callback)
+          return id
+        }
+        window.cancelAnimationFrame = (id) => callbacks.delete(id)
+        const chart = document.querySelector('#chart')
+        const scroll = document.querySelector('#chart-scroll')
+        const marker = () => document.querySelector('.segment.blocked').getBoundingClientRect().x
+        window.panSamples = []
+        window.panDraws = []
+        window.panOrigin = marker()
+        window.panWidth = document.querySelector('#plot').clientWidth - 56
+        const origin = performance.now()
+        window.panStep = (tick, delta) => {
+          if (delta !== undefined)
+            scroll.dispatchEvent(new WheelEvent('wheel', { deltaX: delta, cancelable: true }))
+          const previous = chart.firstElementChild
+          const at = origin + (tick * 1000) / rate
+          const batch = [...callbacks.values()]
+          callbacks.clear()
+          for (const callback of batch) callback(at)
+          const sample = { at, x: marker() }
+          window.panSamples.push(sample)
+          if (chart.firstElementChild !== previous) window.panDraws.push(sample)
+        }
+        for (let tick = 1; tick <= rate * 2; tick++)
+          window.panStep(tick, tick <= rate ? -0.5 : 0.25)
+        window.panStep(rate * 2 + 4)
+      }, rate)
+      release()
+      await page.waitForFunction(
+        () => window.snapshotRequests.length >= 3 && !document.querySelector('#retry').disabled,
+        null,
+        { polling: 10 }
+      )
+      const result = await page.evaluate((rate) => {
+        // A completed host reply and gesture-settlement render both queue here.
+        // Neither may redraw again at the last already-painted display instant.
+        window.panStep(rate * 2 + 4)
+        const before = window.panDraws.length
+        document.querySelector('#search').dispatchEvent(new Event('input'))
+        window.panStep(rate * 2 + 4)
+        const sameFrameDraws = window.panDraws.length - before
+        window.panStep(rate * 2 + 8)
+        return {
+          draws: window.panDraws,
+          sameFrameDraws,
+          origin: window.panOrigin,
+          width: window.panWidth,
+          final: window.panSamples.at(-1).x
+        }
+      }, rate)
+      assert.equal(result.sameFrameDraws, 0)
+      let peak = 0
+      for (const frame of result.draws) {
+        const count = result.draws.filter(
+          (other) => other.at > frame.at - 1000 + 0.001 && other.at <= frame.at
+        ).length
+        peak = Math.max(peak, count)
+        assert.ok(count <= 60, JSON.stringify({ rate, count, frame }))
+      }
+      assert.ok(result.draws.length >= 75, `rate ${rate}: ${result.draws.length} plot updates`)
+      assert.ok(result.draws.some((frame) => frame.x > result.final + 1))
+      const expected = result.origin + ((rate * 0.25) / 600) * result.width
+      assert.ok(
+        Math.abs(result.final - expected) < 0.05,
+        JSON.stringify({ rate, result, expected })
+      )
+      assert.equal(f.inputs.at(-1).view.end, NOW - rate * 125)
+      t.diagnostic(
+        JSON.stringify({
+          simulatedDisplayHz: rate,
+          svgUpdates: result.draws.length,
+          peakUpdatesPerSecond: peak,
+          finalErrorPx: Math.abs(result.final - expected)
+        })
+      )
+      assert.deepEqual(errors, [])
+    } finally {
+      release?.()
+      await page.close()
+    }
   }
 })

@@ -40,6 +40,9 @@ session identity can show observed states, but cannot be resumed by this plugin.
   Select an individual gap to see its coverage.
 - Use the window slider, duration presets, From/To controls, pan or modified wheel
   to inspect a period from five minutes to seven days.
+  Horizontal gestures reproject retained observations at up to 60 frames per
+  second while viewport requests are coalesced. Unloaded intervals stay empty
+  until their matching snapshot arrives; missing activity is never synthesized.
 - Pause view freezes inspection while collection continues.
 - Hide short tasks filters only reliably finished executions below three minutes.
   Incomplete history remains visible. Session summaries alone never prove a short task.

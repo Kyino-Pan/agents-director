@@ -202,6 +202,7 @@ test('horizontal gestures keep existing lanes still while new activity and conne
       for (const deltaX of [-50, -25, 75, -65]) {
         chart.dispatchEvent(new WheelEvent('wheel', { deltaX, cancelable: true, bubbles: true }))
         await new Promise(requestAnimationFrame)
+        await new Promise(requestAnimationFrame)
         states.push({
           ids: [...document.querySelectorAll('.lane')].map((lane) => lane.dataset.agent),
           olderBars: document.querySelectorAll('.segment-target[data-agent="older"]').length,

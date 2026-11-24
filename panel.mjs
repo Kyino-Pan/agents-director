@@ -95,10 +95,16 @@ let pausedAt = null
 let viewRevision = 0
 let displayedViewRevision = -1
 let viewTimer = null
+let panFrame = null
+let panRendering = false
+let lastPanFrame = -Infinity
 let lastViewRequest = -Infinity
 const requestedView = () => ({ hours: preferences.hours, end: viewEnd ?? pausedAt })
 function refreshView(defer = false) {
   viewRevision++
+  // Reproject retained observations on the next frame. Host request throttling
+  // must not throttle visual feedback, even while every reply is becoming stale.
+  render()
   if (!defer) {
     clearTimeout(viewTimer)
     viewTimer = null
@@ -330,6 +336,29 @@ function pinButton(field, key, name, pinned) {
 }
 
 function render() {
+  if (!panRendering && performance.now() - lastPanFrame >= 1000 / 60) {
+    draw()
+  } else if (panFrame === null) {
+    panFrame = requestAnimationFrame(drawPan)
+  }
+}
+
+function drawPan(at) {
+  panFrame = null
+  if (disposed) return
+  // Use the display clock so 120/144 Hz hosts cannot turn input bursts,
+  // gesture settlement or host replies into more than 60 plot updates/second.
+  // The epsilon only covers floating-point roundoff at exact frame boundaries.
+  if (at - lastPanFrame + 1e-6 < 1000 / 60) {
+    panFrame = requestAnimationFrame(drawPan)
+    return
+  }
+  lastPanFrame = at
+  draw()
+  if (!gestureAgents && displayedViewRevision === viewRevision) panRendering = false
+}
+
+function draw() {
   if (!displayed) {
     return
   }
@@ -340,9 +369,8 @@ function render() {
   $('hide-short-tasks').setAttribute('aria-pressed', String(preferences.hideShortTasks))
   $('shorten-links').setAttribute('aria-pressed', String(preferences.compactLanes))
   const { start, end } = viewWindow(snapshot.now, snapshot.windowStart, requestedView())
-  // Keep the last complete plot while a new viewport is in flight. A cropped
-  // response for the previous viewport cannot describe the requested one.
-  if (snapshot.view && (snapshot.view.start !== start || snapshot.view.end !== end)) return
+  // A pending viewport can reuse exact retained intervals at their new positions.
+  // Missing observations stay absent until the matching snapshot arrives.
   const inWindow = (segment) => segment.end > start && segment.start < end
   const pins = new Set(snapshot.agents.filter((agent) => agent.pinned).map(terminalKey))
   const activity = windowActivity(snapshot, start, end)
@@ -1075,7 +1103,6 @@ for (const value of [1 / 4, 1, 6, 24, 168]) {
   localizeTick(tick, value)
   tick.addEventListener('click', () => {
     preferences.set({ hours: Math.max(minHours, Math.min(value, maxHours)) })
-    render()
     refreshView()
   })
   $('zoom-ticks').append(tick)
@@ -1089,7 +1116,6 @@ $('zoom').addEventListener('input', () => {
         ? minHours
         : minHours * (maxHours / minHours) ** fraction
   preferences.set({ hours }, true)
-  render()
   refreshView(true)
 })
 $('zoom').addEventListener('change', preferences.flush)
@@ -1105,7 +1131,6 @@ function setRange(start, end, defer = false) {
   hours = (end - start) / HOUR
   preferences.set({ hours }, true)
   viewEnd = end >= displayed.now ? null : end
-  render()
   refreshView(defer)
 }
 for (const id of ['range-start', 'range-end']) {
@@ -1141,6 +1166,7 @@ $('chart-scroll').addEventListener(
       return
     }
     event.preventDefault()
+    if (!event.ctrlKey && !event.metaKey) panRendering = true
     holdLanesDuringGesture()
     const end = viewEnd ?? pausedAt ?? displayed.now
     if (event.ctrlKey || event.metaKey) {
@@ -1169,7 +1195,6 @@ $('pause').addEventListener('click', () => {
   if ($('failure').hidden) {
     showViewStatus()
   }
-  render()
   refreshView()
 })
 $('lanes').addEventListener('click', (event) => {
@@ -1245,6 +1270,7 @@ window.addEventListener(
     window.clearInterval(timer)
     clearTimeout(gestureTimer)
     clearTimeout(viewTimer)
+    cancelAnimationFrame(panFrame)
     resize.disconnect()
     cancelAnimationFrame(resizeFrame)
     laneMotion.dispose()
