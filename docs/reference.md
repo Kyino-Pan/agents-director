@@ -119,7 +119,28 @@ custom profile directories, copied databases or direct remote-file reads.
 Session history is bounded to the newest 200 sessions across workspaces, and the
 host may truncate workspace/project lists. Source details report these limits.
 The snapshot includes up to 160 lanes, 4,000 segments across those lanes and
-600 messages. When demand exceeds 4,000 segments, the snapshot first reserves the
+600 messages. Short-task eligibility is decided before the lane budget. Pins
+reserve places first. The newest 600 eligible verified mail observations then
+reserve their session endpoints, newest plotted time first, with message ID as
+the tie-break. Both endpoints of a directed message must fit together; an unfit
+pair is skipped without turning it into a receiver-only message. A real
+receiver-only observation needs one place. In-progress send attempts do not
+reserve lanes. Remaining places use label order, with session identity breaking
+equal-label ties. Selected rows retain the usual pinned/label display order.
+If pins alone exceed 160, that same stable order decides which fit. A pin can
+still retain a filtered short task; mail alone cannot override that policy.
+
+Lane selection does not delete recorder messages or change their endpoints and
+times. Unpinning changes a preference, not the stored messages. A terminal that
+still qualifies through retained mail keeps its connections; a short task hidden
+again by the filter can lose its own connections. Unrelated retained endpoints
+remain connected. A message already saved with its endpoints can reappear after an upgrade
+or reload while its recorder evidence remains within retention/cache limits.
+Messages that never had an accepted receipt or a verified check cannot be
+reconstructed from this change. The plugin does not query CLI inbox history,
+infer a sender from text, or turn provider-internal collaboration into Orca mail.
+
+When demand exceeds 4,000 segments, the snapshot first reserves the
 existing intervals covering both endpoints at the plotted message time, the
 receiver at retrieval, and each lane's latest interval. Sparse lanes keep
 their full history when it fits. Dense lanes share the budget and fill their
@@ -191,8 +212,30 @@ Agents Director custom editor at five-minute zoom and `orca plugin shot`.
   these receipts stay in memory. A run-scoped check requires an explicit terminal
   matching the hook's own terminal.
 - Parsing accepts a direct `orca` or `"$ORCA_CLI_BIN_DIR/orca"` command, plain send/reply receipts or JSON,
-  concise worker-start receipts, and ordinary check text (first message) or JSON
-  (up to 200). Compound shells, redirects, substitutions, failed calls,
+  and concise worker-start receipts. Explicit `--environment local` and
+  `--environment=local` follow the CLI's global-flag positions before, within or
+  after the command path. Other environments, repeated selectors and competing
+  remote flags are rejected; no saved alias is resolved. Message IDs may contain
+  nonempty underscore-separated segments, with the existing 128-character suffix
+  limit and ASCII identity constraints.
+- JSON checks recognize up to 200 IDs. Text `check --full` can establish a batch
+  in the public CLI's tagged format: each message has a header and `[subject]`,
+  optional `[body]`/`[payload]` fields, with every content line indented by two
+  spaces. Public reply/follow-up actions and optional item hints have explicit
+  footer grammars, including active workers, quoted bot/server names, every item
+  status and completion criteria. These are advisory text, never endpoints.
+  Header-looking content stays inside its field. Duplicate IDs, legacy/replay
+  prefixes and over-budget text batches are rejected. Malformed fields or an
+  unproved action boundary stop scanning and keep earlier proved records. After
+  a proved action boundary, unfamiliar metadata quarantines that record while
+  later complete records can still be retained. Arbitrary brackets do not prove
+  a boundary. The final CLI advice is never scanned for more messages.
+  Ordinary concise text and older raw-body formats have no safe
+  framing contract for later headers; they retain only the first header. Use
+  `--json` for complete batches across CLI versions and action/footer formats.
+  Read-only audit rows and explicitly replayed JSON results do not prove receipt.
+  Receipt header/body claims never provide the sender identity.
+- Compound shells, redirects, substitutions, failed calls,
   cross-server sends, replay commands, ambiguous ownership and group sends are
   excluded. Both tool phases must have
   matching call and terminal IDs. An unresolved receipt stays in memory for up

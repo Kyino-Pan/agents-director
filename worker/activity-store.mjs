@@ -122,6 +122,45 @@ function snapshotValue(value) {
   )
 }
 
+// Choose membership before sorting for display. Pins keep their existing priority;
+// verified mail reserves both endpoints together, newest plotted time first. A pair
+// that cannot fit is skipped, never converted into a receiver-only observation.
+function selectLanes(agents, messages, pins, now) {
+  const budget = 160
+  if (agents.length <= budget) return agents
+  const available = new Set(agents.map((agent) => agent.id))
+  const selected = new Set(
+    agents
+      .filter((agent) => pins.has(terminalKey(agent)))
+      .slice(0, budget)
+      .map((agent) => agent.id)
+  )
+  const recent = [...messages]
+    .filter(
+      (message) =>
+        message.at <= now &&
+        ['Send accepted', 'Mailbox received', 'Mailbox input'].includes(message.type) &&
+        (message.from === null || available.has(message.from)) &&
+        available.has(message.to)
+    )
+    .sort((a, b) => b.at - a.at || a.id.localeCompare(b.id))
+    .slice(0, 600)
+  for (const message of recent) {
+    const missing = new Set(
+      [message.from, message.to].filter((id) => id !== null && !selected.has(id))
+    )
+    if (selected.size + missing.size <= budget) {
+      for (const id of missing) selected.add(id)
+    }
+  }
+  for (const agent of agents) {
+    if (selected.size === budget) break
+    selected.add(agent.id)
+  }
+  // agents is already in stable display order; reservation order is not UI order.
+  return agents.filter((agent) => selected.has(agent.id))
+}
+
 // A displayed message can reserve at most three intervals: both lanes at the
 // plotted time and the receiver at retrieval. Even 600 messages fit in 4,000.
 function limitTimeline(agents, messages) {
@@ -646,11 +685,11 @@ export class ActivityStore {
         }
       })
       .filter(Boolean)
-      .sort((a, b) => a.label.localeCompare(b.label))
+      .sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id))
     // Reserve snapshot places for explicitly pinned identities before the normal lane cap.
     if (agents.length > 160 && pins.size)
       agents.sort((a, b) => Number(pins.has(terminalKey(b))) - Number(pins.has(terminalKey(a))))
-    const visible = agents.slice(0, 160)
+    const visible = selectLanes(agents, this.messages.values(), pins, now)
     const ids = new Set(visible.map((agent) => agent.id))
     const messages = [...this.messages.values(), ...attempts]
       .filter(

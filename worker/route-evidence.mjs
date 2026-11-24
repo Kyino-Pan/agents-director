@@ -1,7 +1,7 @@
 // Recognize one literal Orca invocation. Never evaluate shell syntax or search other
 // commands, quoted prose or a tool's output for an embedded invocation.
 const term = /^term_[\da-z-]{1,128}$/i
-const msg = /^msg_[\da-z-]{1,128}$/i
+const msg = /^msg_(?=[\da-z_-]{1,128}$)[\da-z-]+(?:_[\da-z-]+)*$/i
 const dispatch = /^ctx_[\da-z-]{1,128}$/i
 const switches = new Set(['--json', '--full', '--keep-open', '--no-parent'])
 const flagsFor = {
@@ -16,7 +16,15 @@ const flagsFor = {
   'worktree create':
     '--name --repo --agent --prompt --model --effort --base-branch --parent-worktree --no-parent --setup --json'
 }
-const kept = new Set(['--to', '--from', '--terminal', '--surface', '--id', '--run'])
+const kept = new Set([
+  '--to',
+  '--from',
+  '--terminal',
+  '--surface',
+  '--id',
+  '--run',
+  '--environment'
+])
 // Match only the executable word. Never expand variables or accept shell wrappers.
 const executable = /^(?:orca|"\$ORCA_CLI_BIN_DIR\/orca")(?=[ \t])/
 
@@ -42,19 +50,32 @@ export function actionOf(event) {
     if (words.length > 128) return
     index = word.lastIndex
   }
-  const [group, verb, ...args] = words
-  const allowed = flagsFor[group + ' ' + verb]?.split(' ')
-  if (!allowed) return
+  // The public CLI accepts global flags before, within or after the command path,
+  // and --flag=value. Never resolve a saved environment name or an inherited alias.
+  const path = []
   const flags = new Map()
-  for (let i = 0; i < args.length; i++) {
-    const name = args[i]
-    if (!allowed.includes(name) || flags.has(name)) return
-    if (switches.has(name)) flags.set(name, true)
-    else if (i + 1 < args.length && !args[i + 1].startsWith('--')) {
-      const value = args[++i]
+  for (let i = 0; i < words.length; i++) {
+    const argument = words[i]
+    if (!argument.startsWith('--')) {
+      path.push(argument)
+      continue
+    }
+    const equals = argument.indexOf('=')
+    const name = equals < 0 ? argument : argument.slice(0, equals)
+    if (flags.has(name)) return
+    if (switches.has(name)) {
+      if (equals >= 0) return
+      flags.set(name, true)
+    } else if (equals >= 0 || (i + 1 < words.length && !words[i + 1].startsWith('--'))) {
+      const value = equals < 0 ? words[++i] : argument.slice(equals + 1)
       flags.set(name, kept.has(name) ? value : true)
     } else return
   }
+  const [, verb] = path
+  const allowed = flagsFor[path.join(' ')]?.split(' ')
+  if (!allowed || path.length !== 2) return
+  for (const name of flags.keys()) if (name !== '--environment' && !allowed.includes(name)) return
+  if (flags.has('--environment') && flags.get('--environment') !== 'local') return
   const target = flags.get('--to')
   if (target?.length > 256) return
   if (
@@ -75,6 +96,7 @@ export function actionOf(event) {
   if (verb === 'ask' && !flags.has('--question')) return
   return {
     verb,
+    environment: flags.get('--environment'),
     replyTo,
     run,
     target,
@@ -82,6 +104,101 @@ export function actionOf(event) {
     json: flags.has('--json'),
     full: flags.has('--full')
   }
+}
+
+// These are advisory lines emitted by the public CLI, never routing evidence.
+// Match their complete grammar; arbitrary bracketed text cannot close a field.
+function mailboxFooter(line, id) {
+  if (typeof line !== 'string') return
+  if (
+    line.startsWith(`[Reply: orca orchestration reply --id ${id} `) &&
+    /^\[Reply: orca orchestration reply --id \S+(?: --from [\w:./@-]+)? --body "\.\.\."\]$/.test(
+      line
+    )
+  )
+    return 'action'
+  if (
+    /^\[(?:For your information: there is nothing to answer|To start a new worker: orca orchestration worker-start --spec "\.\.\.")\]$/.test(
+      line
+    ) ||
+    /^\[To give this worker more work: orca orchestration send --to dispatch:ctx_[\da-z-]{1,128} --subject "\.\.\." --body "\.\.\."\]$/i.test(
+      line
+    ) ||
+    /^\[Its follow-up (ctx_[\da-z-]{1,128}) is running; to message it: orca orchestration send --to dispatch:\1 --subject "\.\.\." --body "\.\.\."\]$/i.test(
+      line
+    )
+  )
+    return 'action'
+  const remote =
+    /^\[To start more work on (.+): orca orchestration worker-start --on ("(?:[^"\\\r\n$`]|\\["\\$`])*"|[\w.:@/-]+) --spec "\.\.\."\]$/.exec(
+      line
+    )
+  if (remote) {
+    const server = remote[1]
+    const quoted = /^[\w.:@/-]+$/.test(server)
+      ? server
+      : '"' + server.replace(/["\\$`]/g, '\\$&') + '"'
+    if (remote[2] === quoted) return 'action'
+  }
+  const sender =
+    /^\[To answer its sender: orca orchestration send --to (.+?)(?: --chat [\w:./@-]{1,256} --type question)? --subject "\.\.\." --body "\.\.\."\]$/.exec(
+      line
+    )
+  if (sender && /^(?:[\w.:@/-]+|"(?:[^"\\\r\n$`]|\\["\\$`])*")$/.test(sender[1])) return 'action'
+  if (
+    /^\[This worker was started for item ([1-9]\d{0,15}), "[^\r\n]*" \((?:Planned|In progress|Waiting|Needs you|Done|Canceled)\)\. (?:Done means: [^\r\n]*[.!?] )?If this result changes the item, update it with orca bot item <cancel\|comment\|done\|set> \1\.\]$/.test(
+      line
+    )
+  )
+    return 'item'
+}
+
+function fullMailboxReceipt(output) {
+  // --full selects the public CLI's tagged format: every field line (including
+  // empty body lines) has a two-space prefix. Old raw-body output cannot prove
+  // later headers; do not scan it as a batch or use its claimed sender identity.
+  const header = /^(\S+)(?: \[(?:HIGH|URGENT)\])? \[[a-z_]+\] from=[\w:./@-]{1,256}$/
+  const lines = output.replace(/\r\n/g, '\n').split('\n')
+  const delivery = /^Delivery ([\w-]{1,256})$/.exec(lines[0])?.[1]
+  let index = delivery ? 1 : 0
+  const received = new Set()
+  const seen = new Set()
+  const result = () => (received.size ? { received: [...received] } : undefined)
+  while (index < lines.length) {
+    const id = header.exec(lines[index++])?.[1]
+    if (!id || !msg.test(id)) return result()
+    if (seen.has(id) || seen.size === 200) return
+    seen.add(id)
+    const fields = ['[subject]', '[body]', '[payload]']
+    let lastField = -1
+    let sawField = false
+    while (index < lines.length && fields.includes(lines[index])) {
+      const field = fields.indexOf(lines[index++])
+      if (field <= lastField || (lastField === -1 && field !== 0)) return result()
+      lastField = field
+      sawField = true
+      const start = index
+      while (lines[index]?.startsWith('  ')) index++
+      if (index === start) return result()
+    }
+    if (!sawField || mailboxFooter(lines[index], id) !== 'action') return result()
+    index++
+    if (mailboxFooter(lines[index], id) === 'item') index++
+    const acknowledgment =
+      delivery &&
+      `This Orca version does not acknowledge batches automatically. After handling every message, rerun this check with --ack ${delivery}.`
+    if (lines[index]?.startsWith('Next: ') || (acknowledgment && lines[index] === acknowledgment)) {
+      received.add(id)
+      return result() // The CLI's final advice is not another message, even if multiline.
+    }
+    if (index < lines.length && lines[index] !== '') {
+      // A verified action footer closed the fields, but unfamiliar trailing
+      // metadata makes this row uncertain. Skip that row, not its neighbors.
+      while (index < lines.length && lines[index] !== '') index++
+    } else received.add(id)
+    while (lines[index] === '') index++
+  }
+  return result()
 }
 
 function readyWorker(receipt) {
@@ -119,12 +236,17 @@ export function receiptOf(action, event) {
   if (!action.json) {
     if (action.verb === 'worker-start') return plainWorkerReceipt(output)
     if (action.verb === 'send' || action.verb === 'reply') {
-      const id = /^messageId=(msg_[\da-z-]{1,128})(?=\s|$)/i.exec(output)?.[1]
-      if (id && id !== action.replyTo) return { id }
+      const id = /^messageId=(\S+)(?=\s|$)/.exec(output)?.[1]
+      if (id && msg.test(id) && id !== action.replyTo) return { id }
     }
-    if (action.verb === 'check' && !action.full) {
-      const id = /^(msg_[\da-z-]{1,128}) [a-z_]+ from \S+/.exec(output)?.[1]
-      if (id) return { received: [id] }
+    if (action.verb === 'check') {
+      if (action.full) return fullMailboxReceipt(output)
+      // Concise/older raw-body formats are indistinguishable when body text
+      // mimics another header. The first header alone has an unambiguous start.
+      const id = /^(\S+) [a-z_]+ from [\w:./@-]{1,256}(?: \[(?:HIGH|URGENT)\])?(?:\r?\n|$)/.exec(
+        output
+      )?.[1]
+      if (id && msg.test(id)) return { received: [id] }
     }
     return
   }
@@ -136,21 +258,18 @@ export function receiptOf(action, event) {
   }
   if (response?.ok !== true || !response.result) return
   const r = response.result
+  if (r.replayed || r.legacyCompatibility?.readOnly || r.legacyCompatibility?.recovery) return
   if (action.verb === 'check') {
-    if (
-      !Array.isArray(r.messages) ||
-      r.cancelled ||
-      r.connectionLost ||
-      r.legacyCompatibility?.readOnly ||
-      r.legacyCompatibility?.recovery
-    )
-      return
-    return {
-      received: r.messages
-        .slice(0, 200)
-        .map((row) => row?.id)
-        .filter((id) => typeof id === 'string' && msg.test(id))
-    }
+    if (!Array.isArray(r.messages) || r.cancelled || r.connectionLost) return
+    const received = r.messages
+      .slice(0, 200)
+      .filter(
+        (row) => !row?.readOnly && !['audit_only', 'legacy_direct'].includes(row?.delivery_contract)
+      )
+      .map((row) => row?.id)
+      .filter((id) => typeof id === 'string' && msg.test(id))
+    if (new Set(received).size !== received.length) return
+    return { received }
   }
   if (
     action.verb === 'send' ||
@@ -247,7 +366,7 @@ export class RouteEvidence {
       this.bindLaunch(receipt.terminal)
     } else if (receipt.received) {
       for (const id of receipt.received) {
-        remember(this.received, id, { source, at: this.now() })
+        if (!this.received.has(id)) remember(this.received, id, { source, at: this.now() })
         this.confirm(id)
       }
     } else {
