@@ -49,7 +49,7 @@ session identity can show observed states, but cannot be resumed by this plugin.
   English, French or German. **Follow Orca** uses the public frame locale and then the
   browser’s language preferences if Orca has no valid locale. Regional tags preserve local
   number and date formatting. An unsupported Orca language falls back to English. Panel and editor share the same language preference.
-- Hover over a project or terminal name to show its star. A pinned star stays visible. Tab to the star and press Enter
+- Hover over a project or terminal name to show its pin button. A filled pin stays visible. Tab to the pin and press Enter
   or Space to toggle it. Pinned projects lead the list. Pinned terminals lead their own
   project and remain searchable in idle windows. An idle pinned project keeps just its
   heading. Unpinning restores the usual window and short-task filters.

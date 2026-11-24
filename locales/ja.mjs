@@ -1,6 +1,6 @@
 export default {
-  'This pin list is full. Remove a star from this list and try again.':
-    'このピン留めリストはいっぱいです。リスト内の星をひとつ外して、もう一度お試しください。',
+  'This pin list is full. Unpin an item and try again.':
+    'このリストはいっぱいです。項目のピン留めをひとつ解除して、もう一度お試しください。',
   'Could not save this preference. Try again.':
     '設定を保存できませんでした。もう一度お試しください。',
   'Saved preferences are unavailable.': '保存済みの設定を読み込めません。',
@@ -17,7 +17,7 @@ export default {
   'Pause view': '表示を一時停止',
   'Resume live': 'ライブ表示を再開',
   'View paused': '表示を一時停止中',
-  'Live · 5s': 'ライブ · 5秒',
+  Live: 'ライブ',
   'Updating…': '更新中…',
   Disconnected: '切断',
   Window: '表示期間',

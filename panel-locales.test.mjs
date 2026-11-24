@@ -67,6 +67,7 @@ for (const [index, tag] of tags.entries()) {
       for (const width of [320, 960]) {
         await page.setViewportSize({ width, height: 800 })
         assert.equal(await page.locator('html').getAttribute('lang'), tag)
+        assert.equal(await page.locator('#live-status').innerText(), tr('Live'))
         assert.equal(await page.locator('#shorten-links').innerText(), tr('Group related lanes'))
         assert.equal(
           await page.locator('#shorten-links').getAttribute('title'),

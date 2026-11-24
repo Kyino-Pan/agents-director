@@ -1,5 +1,5 @@
 export default {
-  'This pin list is full. Remove a star from this list and try again.':
+  'This pin list is full. Unpin an item and try again.':
     '此置顶列表已满，请先取消该列表中一项的置顶，再重试。',
   'Could not save this preference. Try again.': '无法保存此偏好设置，请重试。',
   'Saved preferences are unavailable.': '暂时无法读取已保存的偏好设置。',
@@ -16,7 +16,7 @@ export default {
   'Pause view': '暂停视图',
   'Resume live': '恢复实时显示',
   'View paused': '视图已暂停',
-  'Live · 5s': '实时 · 5 秒',
+  Live: '实时',
   'Updating…': '更新中…',
   Disconnected: '连接已断开',
   Window: '时间窗口',

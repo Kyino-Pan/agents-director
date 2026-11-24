@@ -1,6 +1,6 @@
 export default {
-  'This pin list is full. Remove a star from this list and try again.':
-    'Diese Liste ist voll. Entfernen Sie einen Stern aus der Liste und versuchen Sie es erneut.',
+  'This pin list is full. Unpin an item and try again.':
+    'Diese Liste ist voll. Lösen Sie die Anheftung eines Eintrags und versuchen Sie es erneut.',
   'Could not save this preference. Try again.':
     'Diese Einstellung konnte nicht gespeichert werden. Bitte erneut versuchen.',
   'Saved preferences are unavailable.': 'Gespeicherte Einstellungen sind nicht verfügbar.',
@@ -17,7 +17,7 @@ export default {
   'Pause view': 'Ansicht pausieren',
   'Resume live': 'Live-Ansicht fortsetzen',
   'View paused': 'Ansicht pausiert',
-  'Live · 5s': 'Live · 5 s',
+  Live: 'Live',
   'Updating…': 'Aktualisierung läuft…',
   Disconnected: 'Getrennt',
   Window: 'Zeitfenster',

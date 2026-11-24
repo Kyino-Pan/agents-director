@@ -1,6 +1,6 @@
 export default {
-  'This pin list is full. Remove a star from this list and try again.':
-    'Cette liste est pleine. Retirez une étoile de la liste et réessayez.',
+  'This pin list is full. Unpin an item and try again.':
+    'Cette liste est pleine. Désépinglez un élément, puis réessayez.',
   'Could not save this preference. Try again.': 'Impossible d’enregistrer ce réglage. Réessayez.',
   'Saved preferences are unavailable.': 'Les réglages enregistrés sont indisponibles.',
   'Version unavailable': 'Version indisponible',
@@ -16,7 +16,7 @@ export default {
   'Pause view': 'Suspendre la vue',
   'Resume live': 'Reprendre le direct',
   'View paused': 'Vue suspendue',
-  'Live · 5s': 'En direct · 5 s',
+  Live: 'En direct',
   'Updating…': 'Actualisation…',
   Disconnected: 'Déconnecté',
   Window: 'Période',

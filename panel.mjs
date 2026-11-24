@@ -298,6 +298,9 @@ function pinButton(field, key, name, pinned) {
         : 'Pin terminal {name}'
   button.title = (pinned ? t('Pinned') + ' · ' : '') + t(action, { name })
   button.setAttribute('aria-label', button.title)
+  const icon = svg('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true', focusable: 'false' })
+  icon.append(svg('path', { d: 'M8 3h8l-1 7 3 3v2H6v-2l3-3z M12 15v6' }))
+  button.append(icon)
   return button
 }
 
@@ -839,7 +842,7 @@ function setConnection(state, label) {
 
 function showViewStatus() {
   if (paused) setConnection('paused', 'View paused')
-  else if (latest) setConnection('live', 'Live · 5s')
+  else if (latest) setConnection('live', 'Live')
   else setConnection('updating', 'Updating…')
 }
 
@@ -982,7 +985,7 @@ async function changePreference(change) {
     preferenceError = result?.saved
       ? null
       : result?.reason === 'pinLimit'
-        ? 'This pin list is full. Remove a star from this list and try again.'
+        ? 'This pin list is full. Unpin an item and try again.'
         : 'Could not save this preference. Try again.'
   } catch {
     preferenceError = 'Could not save this preference. Try again.'

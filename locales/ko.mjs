@@ -1,6 +1,6 @@
 export default {
-  'This pin list is full. Remove a star from this list and try again.':
-    '이 고정 목록이 가득 찼습니다. 목록에서 별표 하나를 해제한 후 다시 시도하세요.',
+  'This pin list is full. Unpin an item and try again.':
+    '이 고정 목록이 가득 찼습니다. 항목 하나를 고정 해제한 후 다시 시도하세요.',
   'Could not save this preference. Try again.': '설정을 저장할 수 없습니다. 다시 시도하세요.',
   'Saved preferences are unavailable.': '저장된 설정을 불러올 수 없습니다.',
   'Version unavailable': '버전 정보 없음',
@@ -16,7 +16,7 @@ export default {
   'Pause view': '보기 일시 정지',
   'Resume live': '실시간 보기 재개',
   'View paused': '보기 일시 정지됨',
-  'Live · 5s': '실시간 · 5초',
+  Live: '실시간',
   'Updating…': '업데이트 중…',
   Disconnected: '연결 끊김',
   Window: '시간 범위',
