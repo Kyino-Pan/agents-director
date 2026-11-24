@@ -479,6 +479,10 @@ input::placeholder {
 .legend .unknown {
   fill: url(#unobserved-hatch);
 }
+/* Keep the shared hatch behind communication, including its legend swatch. */
+#unobserved-hatch rect {
+  fill-opacity: 0.4;
+}
 .segment-hit {
   fill: transparent;
 }
@@ -511,21 +515,22 @@ input::placeholder {
   fill: none;
   stroke: var(--orca-foreground);
   stroke-width: 1;
-  opacity: 0.3;
+  opacity: 0.7;
 }
 /* A grouped arrow can contain both pending and confirmed receipts. */
 .message-target[data-status='Mixed'] .message-path {
   stroke-width: 1.5;
-  opacity: 0.8;
+  opacity: 0.95;
 }
 .message-target[data-status='Send attempted'] .message-path {
   stroke-dasharray: 1 4;
-}
-.message-target[data-status='Send accepted'] .message-path {
   opacity: 0.65;
 }
+.message-target[data-status='Send accepted'] .message-path {
+  opacity: 0.85;
+}
 .message-target[data-status='Mailbox received'] .message-path {
-  opacity: 0.9;
+  opacity: 1;
 }
 .message-hit {
   fill: none;
@@ -537,7 +542,7 @@ input::placeholder {
   fill: var(--orca-background);
   stroke: var(--orca-foreground);
   stroke-width: 1;
-  opacity: 0.5;
+  opacity: 0.8;
 }
 .unobserved-endpoint {
   fill: var(--orca-background);

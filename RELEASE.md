@@ -1,4 +1,31 @@
-# v0.2.1 prepared change
+# v0.2.3
+
+Changes since [v0.2.2](https://github.com/Kyino-Pan/agents-director/releases/tag/v0.2.2).
+Requires Orca **>=1.4.260 / Host API 1.10**.
+
+- Dim Unobserved hatching in both themes and its legend. Message paths, arrowheads
+  and mailbox markers have stronger contrast, with distinct send-attempt,
+  send-accepted and mailbox-received stages. Working keeps its bamboo green;
+  short intervals keep their measured duration.
+- Pan the timeline with responsive horizontal gestures, paced at up to 60 frames
+  per second. Retained observations move immediately while viewport requests
+  coalesce; unloaded history stays empty until its matching snapshot arrives.
+- Allocate the segment budget to the visible time window so older history does
+  not crowd out its measured states and communication endpoints. Stale viewport
+  replies cannot replace a newer view.
+- Preserve verified local coordination under lane, segment and receipt limits,
+  including retained message endpoints and safely framed mailbox batches.
+- Keep the live label steady during background refreshes, and use pushpin icons
+  for pinned projects and terminals.
+
+The public APIs, requested permissions and engine minimum are unchanged from
+v0.2.2. Collection remains limited to publicly observed states and verified local
+terminal tool receipts. Missing execution history, native-chat/remote coordination,
+conversation bodies and per-terminal memory are not reconstructed. No directory
+listing or maintainer endorsement is implied; [review issue #11](https://github.com/Kyino-Pan/agents-director/issues/11)
+remains open.
+
+## v0.2.1
 
 - Reclaim old recorder keys by name and discard uncommitted public chunks before
   saving. A failed write preserves the last committed public snapshot, including
