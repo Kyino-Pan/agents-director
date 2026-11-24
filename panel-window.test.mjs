@@ -135,6 +135,7 @@ test('round ticks use the slider log scale and select exact persisted durations 
       assert.equal(await tick.evaluate((button) => button === document.activeElement), true)
     }
     await page.locator('.zoom-tick[data-hours="6"]').click()
+    const beforePan = await page.locator('#range-end').inputValue()
     await page
       .locator('#chart-scroll')
       .evaluate((chart) =>
@@ -142,6 +143,10 @@ test('round ticks use the slider log scale and select exact persisted durations 
           new WheelEvent('wheel', { deltaX: -200, shiftKey: true, cancelable: true })
         )
       )
+    await page.waitForFunction(
+      (before) => document.querySelector('#range-end').value !== before,
+      beforePan
+    )
     const end = await page.locator('#range-end').inputValue()
     await page.locator('.zoom-tick[data-hours="1"]').focus()
     await page.keyboard.press('Enter')
@@ -273,7 +278,10 @@ test('panning into an empty interval retains the chart and can pan straight back
         })
       )
     )
-    assert.equal(await page.locator('#period').textContent(), before)
+    await page.waitForFunction(
+      (period) => document.querySelector('#period').textContent === period,
+      before
+    )
     await page.locator('#view-empty').waitFor({ state: 'hidden' })
     assert.equal(await page.locator('#view-empty').isHidden(), true)
     assert.equal(await page.locator('.lane-name').textContent(), 'Recent agent')

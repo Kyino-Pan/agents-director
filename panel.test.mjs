@@ -566,6 +566,7 @@ test('window slider spans five minutes to seven days and clamps to older snapsho
     window.testSnapshot.windowStart = window.testSnapshot.now - 24 * 3_600_000
     window.notifyActivity()
   })
+  await page.waitForFunction(() => document.getElementById('zoom-limit').textContent === '24h')
   await slider.focus()
   await page.keyboard.press('End')
   assert.equal(await page.locator('#zoom-limit').textContent(), '24h')

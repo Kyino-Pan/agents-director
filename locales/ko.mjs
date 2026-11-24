@@ -1,6 +1,6 @@
 export default {
-  'This pin list is full. Remove a star from this list and try again.':
-    '이 고정 목록이 가득 찼습니다. 목록에서 별표 하나를 해제한 후 다시 시도하세요.',
+  'This pin list is full. Unpin an item and try again.':
+    '이 고정 목록이 가득 찼습니다. 항목 하나를 고정 해제한 후 다시 시도하세요.',
   'Could not save this preference. Try again.': '설정을 저장할 수 없습니다. 다시 시도하세요.',
   'Saved preferences are unavailable.': '저장된 설정을 불러올 수 없습니다.',
   'Version unavailable': '버전 정보 없음',
@@ -16,7 +16,7 @@ export default {
   'Pause view': '보기 일시 정지',
   'Resume live': '실시간 보기 재개',
   'View paused': '보기 일시 정지됨',
-  'Live · 5s': '실시간 · 5초',
+  Live: '실시간',
   'Updating…': '업데이트 중…',
   Disconnected: '연결 끊김',
   Window: '시간 범위',
@@ -171,6 +171,20 @@ export default {
     'Orca에서 원래 작업 공간을 더 이상 사용할 수 없습니다.',
   'More than one terminal owns this session; choose it in Orca.':
     '여러 터미널이 이 세션을 사용합니다. Orca에서 선택하세요.',
+  'Orca has not provided a terminal for this live session.':
+    'Orca에서 이 실행 중인 세션의 터미널을 제공하지 않았습니다.',
+  'Orca could not verify the complete agent inventory. Choose this session in Orca.':
+    'Orca가 전체 에이전트 목록을 확인하지 못했습니다. Orca에서 이 세션을 선택하세요.',
+  'Orca cannot identify the original workspace for this history-only session. Choose it in Orca.':
+    'Orca가 이 기록 세션의 원래 작업 공간을 식별할 수 없습니다. Orca에서 선택하세요.',
+  'The original workspace now belongs to a different host. Open it in Orca.':
+    '원래 작업 공간이 다른 호스트에 속해 있습니다. Orca에서 여세요.',
+  'This session is running in another workspace; choose it in Orca.':
+    '이 세션은 다른 작업 공간에서 실행 중입니다. Orca에서 선택하세요.',
+  'Orca did not list this terminal in its original workspace. Open it in Orca.':
+    'Orca가 원래 작업 공간에 이 터미널을 나열하지 않았습니다. Orca에서 여세요.',
+  'The terminal has conflicting public session identities; choose it in Orca.':
+    '이 터미널의 공개 세션 정보가 충돌합니다. Orca에서 터미널을 선택하세요.',
   'This session is not available in the public history for its original workspace.':
     '원래 작업 공간의 공개 기록에 이 세션이 없습니다.',
   'Orca did not return a terminal for this session.':

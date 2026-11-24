@@ -16,6 +16,7 @@ export class PublicCollector {
   revisions = new Map()
   identities = new Map()
   historyAt = -Infinity
+  launchHistoryAt = new Map()
   sequence = 0
 
   constructor(store, host, now = Date.now) {
@@ -254,6 +255,26 @@ export class PublicCollector {
     await Promise.all(Array.from({ length: Math.min(rows.length, 4) }, scanWorkspace))
     if (this.now() - this.historyAt >= HISTORY_INTERVAL_MS) await this.history()
     this.relations.refresh()
+    // A fresh terminal can precede the host's unscoped history cache, or fall
+    // outside its newest 200 rows. Ask only the proven launch's workspace for
+    // the missing creation bound; never replace it with an observation time.
+    const pending = this.relations.pendingLaunchWorkspaces()
+    for (const workspace of this.launchHistoryAt.keys()) {
+      if (!pending.has(workspace)) this.launchHistoryAt.delete(workspace)
+    }
+    const scopes = [...pending]
+      .filter(
+        (workspace) =>
+          this.now() - (this.launchHistoryAt.get(workspace) ?? -Infinity) >= HISTORY_INTERVAL_MS
+      )
+      .slice(0, 4)
+    await Promise.all(
+      scopes.map(async (workspace) => {
+        this.launchHistoryAt.set(workspace, this.now())
+        await this.history(workspace)
+      })
+    )
+    this.relations.refresh()
     for (const [route, identity] of this.identities) {
       if (!this.live.has(route) && this.now() - identity.since > 120000)
         this.identities.delete(route)
@@ -262,10 +283,14 @@ export class PublicCollector {
     store.prune(this.now())
   }
 
-  async history() {
-    this.historyAt = this.now()
+  async history(workspaceId) {
+    if (!workspaceId) this.historyAt = this.now()
+    const source = workspaceId ? `Session history · ${workspaceId}` : 'Session history'
     try {
-      const result = await this.host.call('agent.listSessions', { limit: 200 })
+      const result = await this.host.call('agent.listSessions', {
+        ...(workspaceId && { workspaceId }),
+        limit: 200
+      })
       if (!Array.isArray(result.sessions)) throw new Error('Invalid session history')
       const now = this.now()
       // Summary timestamps must never insert an unknown boundary after observed state.
@@ -281,6 +306,7 @@ export class PublicCollector {
         if (
           !row.sessionId ||
           !row.agent ||
+          (workspaceId && row.workspaceId !== workspaceId) ||
           !Number.isFinite(row.updatedAt) ||
           row.updatedAt < now - WINDOW_MS
         )
@@ -321,12 +347,12 @@ export class PublicCollector {
         )
       }
       this.store.source(
-        'Session history',
+        source,
         result.truncated ? 'limited' : 'ok',
         `${result.truncated ? 'Newest 200 sessions; additional sessions are unavailable. ' : ''}Summaries only; past execution states are unknown.`
       )
     } catch (error) {
-      this.store.source('Session history', 'error', error.message)
+      this.store.source(source, 'error', error.message)
     }
   }
 }

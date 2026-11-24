@@ -1,6 +1,6 @@
 export default {
-  'This pin list is full. Remove a star from this list and try again.':
-    'このピン留めリストはいっぱいです。リスト内の星をひとつ外して、もう一度お試しください。',
+  'This pin list is full. Unpin an item and try again.':
+    'このリストはいっぱいです。項目のピン留めをひとつ解除して、もう一度お試しください。',
   'Could not save this preference. Try again.':
     '設定を保存できませんでした。もう一度お試しください。',
   'Saved preferences are unavailable.': '保存済みの設定を読み込めません。',
@@ -17,7 +17,7 @@ export default {
   'Pause view': '表示を一時停止',
   'Resume live': 'ライブ表示を再開',
   'View paused': '表示を一時停止中',
-  'Live · 5s': 'ライブ · 5秒',
+  Live: 'ライブ',
   'Updating…': '更新中…',
   Disconnected: '切断',
   Window: '表示期間',
@@ -172,6 +172,20 @@ export default {
     '元のワークスペースは Orca で利用できなくなりました。',
   'More than one terminal owns this session; choose it in Orca.':
     '複数のターミナルがこのセッションを使用しています。Orca で選択してください。',
+  'Orca has not provided a terminal for this live session.':
+    'Orca はこの実行中のセッションのターミナルを提供していません。',
+  'Orca could not verify the complete agent inventory. Choose this session in Orca.':
+    'Orca はエージェントの完全な一覧を確認できませんでした。Orca でこのセッションを選択してください。',
+  'Orca cannot identify the original workspace for this history-only session. Choose it in Orca.':
+    'Orca はこの履歴セッションの元のワークスペースを特定できません。Orca で選択してください。',
+  'The original workspace now belongs to a different host. Open it in Orca.':
+    '元のワークスペースは別のホストに属しています。Orca で開いてください。',
+  'This session is running in another workspace; choose it in Orca.':
+    'このセッションは別のワークスペースで実行中です。Orca で選択してください。',
+  'Orca did not list this terminal in its original workspace. Open it in Orca.':
+    'Orca は元のワークスペースにこのターミナルを表示していません。Orca で開いてください。',
+  'The terminal has conflicting public session identities; choose it in Orca.':
+    'このターミナルの公開セッション情報が矛盾しています。Orca で選択してください。',
   'This session is not available in the public history for its original workspace.':
     '元のワークスペースの公開履歴にこのセッションはありません。',
   'Orca did not return a terminal for this session.':

@@ -19,6 +19,7 @@ import { harnessIcon, harnessLabel, shortAgentId } from './panel-harness.mjs'
 import { installActivityActions, renderSources } from './panel-actions.mjs'
 import { createLaneMotion, spawnPath, messagePath } from './lane-motion.mjs'
 import { loadViewPreferences } from './view-preferences.mjs'
+import { viewWindow } from './view-window.mjs'
 
 const HOUR = 3_600_000
 const ROW = 32
@@ -90,6 +91,36 @@ if (updateLocale(preferences.language)) localizeDocument()
 let hours = preferences.hours
 let viewEnd = null
 let paused = false
+let pausedAt = null
+let viewRevision = 0
+let displayedViewRevision = -1
+let viewTimer = null
+let panFrame = null
+let panRendering = false
+let lastPanFrame = -Infinity
+let lastViewRequest = -Infinity
+const requestedView = () => ({ hours: preferences.hours, end: viewEnd ?? pausedAt })
+function refreshView(defer = false) {
+  viewRevision++
+  // Reproject retained observations on the next frame. Host request throttling
+  // must not throttle visual feedback, even while every reply is becoming stale.
+  render()
+  if (!defer) {
+    clearTimeout(viewTimer)
+    viewTimer = null
+    void refresh()
+  } else if (viewTimer === null) {
+    // Trackpad and slider input can exceed the host's message rate. Coalesce
+    // them while reading the latest desired viewport when the timer fires.
+    viewTimer = setTimeout(
+      () => {
+        viewTimer = null
+        void refresh()
+      },
+      Math.max(0, 250 - (performance.now() - lastViewRequest))
+    )
+  }
+}
 let pending = false
 let rerun = false
 let selection = null
@@ -298,10 +329,36 @@ function pinButton(field, key, name, pinned) {
         : 'Pin terminal {name}'
   button.title = (pinned ? t('Pinned') + ' · ' : '') + t(action, { name })
   button.setAttribute('aria-label', button.title)
+  const icon = svg('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true', focusable: 'false' })
+  icon.append(svg('path', { d: 'M8 3h8l-1 7 3 3v2H6v-2l3-3z M12 15v6' }))
+  button.append(icon)
   return button
 }
 
 function render() {
+  if (!panRendering && performance.now() - lastPanFrame >= 1000 / 60) {
+    draw()
+  } else if (panFrame === null) {
+    panFrame = requestAnimationFrame(drawPan)
+  }
+}
+
+function drawPan(at) {
+  panFrame = null
+  if (disposed) return
+  // Use the display clock so 120/144 Hz hosts cannot turn input bursts,
+  // gesture settlement or host replies into more than 60 plot updates/second.
+  // The epsilon only covers floating-point roundoff at exact frame boundaries.
+  if (at - lastPanFrame + 1e-6 < 1000 / 60) {
+    panFrame = requestAnimationFrame(drawPan)
+    return
+  }
+  lastPanFrame = at
+  draw()
+  if (!gestureAgents && displayedViewRevision === viewRevision) panRendering = false
+}
+
+function draw() {
   if (!displayed) {
     return
   }
@@ -311,11 +368,9 @@ function render() {
   renderZoom(snapshot)
   $('hide-short-tasks').setAttribute('aria-pressed', String(preferences.hideShortTasks))
   $('shorten-links').setAttribute('aria-pressed', String(preferences.compactLanes))
-  const end = Math.min(
-    snapshot.now,
-    Math.max(snapshot.windowStart + hours * HOUR, viewEnd ?? snapshot.now)
-  )
-  const start = Math.max(snapshot.windowStart, end - hours * HOUR)
+  const { start, end } = viewWindow(snapshot.now, snapshot.windowStart, requestedView())
+  // A pending viewport can reuse exact retained intervals at their new positions.
+  // Missing observations stay absent until the matching snapshot arrives.
   const inWindow = (segment) => segment.end > start && segment.start < end
   const pins = new Set(snapshot.agents.filter((agent) => agent.pinned).map(terminalKey))
   const activity = windowActivity(snapshot, start, end)
@@ -829,13 +884,26 @@ function inspect(target) {
 }
 
 function setConnection(state, label) {
-  $('live-status').dataset.label = label
-  $('live-status').dataset.state = state
-  $('live-status').textContent = t(label)
+  const status = $('live-status')
+  const text = t(label)
+  if (status.dataset.state === state && status.textContent === text) return
+  status.dataset.label = label
+  status.dataset.state = state
+  status.textContent = text
+}
+
+function showViewStatus() {
+  if (paused) setConnection('paused', 'View paused')
+  else if (latest) setConnection('live', 'Live')
+  else setConnection('updating', 'Updating…')
 }
 
 async function refresh() {
   if (disposed) {
+    return
+  }
+  if (viewTimer !== null) {
+    rerun = true
     return
   }
   if (pending) {
@@ -843,18 +911,21 @@ async function refresh() {
     return
   }
   pending = true
-  if (!paused) setConnection('updating', 'Updating…')
+  lastViewRequest = performance.now()
   $('retry').disabled = true
+  const hideShortTasks = preferences.hideShortTasks
+  const revision = viewRevision
+  const stale = () => revision !== viewRevision || hideShortTasks !== preferences.hideShortTasks
   try {
     if (!window.orca?.plugin?.request) {
       throw new Error('Open this panel in Orca with the Agents Director plugin enabled.')
     }
-    const hideShortTasks = preferences.hideShortTasks
     let snapshot = await window.orca.plugin.request('activity.snapshot', {
       hideShortTasks,
-      withOmittedActivity: true
+      withOmittedActivity: true,
+      view: requestedView()
     })
-    if (hideShortTasks !== preferences.hideShortTasks) {
+    if (stale()) {
       rerun = true
       return
     }
@@ -904,6 +975,11 @@ async function refresh() {
       }
       snapshot = { ...snapshot, pinnedProjects }
     }
+    if (disposed) return
+    if (stale()) {
+      rerun = true
+      return
+    }
     if (snapshot.language && !snapshot.preferencesUnavailable)
       preferences.language = snapshot.language
     $('language').value = preferences.language
@@ -915,19 +991,30 @@ async function refresh() {
     updatePreferenceError(snapshot.preferencesUnavailable)
     latest = snapshot
     $('failure').hidden = true
-    setConnection(paused ? 'paused' : 'live', paused ? 'View paused' : 'Live · 5s')
-    if (!paused || !displayed || displayedHideShortTasks !== hideShortTasks) {
+    showViewStatus()
+    if (
+      !paused ||
+      !displayed ||
+      displayedHideShortTasks !== hideShortTasks ||
+      displayedViewRevision !== revision
+    ) {
       displayedHideShortTasks = hideShortTasks
+      displayedViewRevision = revision
       displayed = latest
       render()
     } else if (
       displayed.pinVersion !== latest.pinVersion ||
       displayed.headingVersion !== latest.headingVersion
     ) {
-      displayed = { ...latest, now: displayed.now, windowStart: displayed.windowStart }
+      displayed = latest
       render()
     } else if (localeChanged) render()
   } catch (error) {
+    if (disposed) return
+    if (stale()) {
+      rerun = true
+      return
+    }
     if (updateLocale(preferences.language)) {
       localizeDocument()
       render()
@@ -937,7 +1024,7 @@ async function refresh() {
   } finally {
     pending = false
     $('retry').disabled = false
-    if (rerun && !disposed) {
+    if (rerun && !disposed && viewTimer === null) {
       rerun = false
       void refresh()
     }
@@ -974,7 +1061,7 @@ async function changePreference(change) {
     preferenceError = result?.saved
       ? null
       : result?.reason === 'pinLimit'
-        ? 'This pin list is full. Remove a star from this list and try again.'
+        ? 'This pin list is full. Unpin an item and try again.'
         : 'Could not save this preference. Try again.'
   } catch {
     preferenceError = 'Could not save this preference. Try again.'
@@ -1016,7 +1103,7 @@ for (const value of [1 / 4, 1, 6, 24, 168]) {
   localizeTick(tick, value)
   tick.addEventListener('click', () => {
     preferences.set({ hours: Math.max(minHours, Math.min(value, maxHours)) })
-    render()
+    refreshView()
   })
   $('zoom-ticks').append(tick)
 }
@@ -1029,14 +1116,14 @@ $('zoom').addEventListener('input', () => {
         ? minHours
         : minHours * (maxHours / minHours) ** fraction
   preferences.set({ hours }, true)
-  render()
+  refreshView(true)
 })
 $('zoom').addEventListener('change', preferences.flush)
-function setRange(start, end) {
+function setRange(start, end, defer = false) {
   if (!displayed || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
     return
   }
-  end = Math.min(displayed.now, end)
+  end = Math.min(pausedAt ?? displayed.now, end)
   start = Math.max(displayed.windowStart, start)
   if (end <= start) {
     return
@@ -1044,7 +1131,7 @@ function setRange(start, end) {
   hours = (end - start) / HOUR
   preferences.set({ hours }, true)
   viewEnd = end >= displayed.now ? null : end
-  render()
+  refreshView(defer)
 }
 for (const id of ['range-start', 'range-end']) {
   $(id).addEventListener('change', () =>
@@ -1079,34 +1166,36 @@ $('chart-scroll').addEventListener(
       return
     }
     event.preventDefault()
+    if (!event.ctrlKey && !event.metaKey) panRendering = true
     holdLanesDuringGesture()
-    const end = viewEnd ?? displayed.now
+    const end = viewEnd ?? pausedAt ?? displayed.now
     if (event.ctrlKey || event.metaKey) {
       const delta = Math.max(-100, Math.min(100, event.deltaY))
       const next = Math.max(minHours, Math.min(maxHours, hours * Math.exp(delta * 0.0015)))
-      setRange(end - next * HOUR, end)
+      setRange(end - next * HOUR, end, true)
     } else {
       const delta = ((event.deltaX || event.deltaY) * hours * HOUR) / 600
       const boundedEnd = Math.min(
-        displayed.now,
+        pausedAt ?? displayed.now,
         Math.max(displayed.windowStart + hours * HOUR, end + delta)
       )
-      setRange(boundedEnd - hours * HOUR, boundedEnd)
+      setRange(boundedEnd - hours * HOUR, boundedEnd, true)
     }
   },
   { passive: false }
 )
 $('pause').addEventListener('click', () => {
   paused = !paused
+  pausedAt = paused ? (displayed?.now ?? null) : null
   $('pause').textContent = t(paused ? 'Resume live' : 'Pause view')
   $('pause').setAttribute('aria-pressed', String(paused))
   if (!paused && latest) {
     displayed = latest
   }
   if ($('failure').hidden) {
-    setConnection(paused ? 'paused' : 'live', paused ? 'View paused' : 'Live · 5s')
+    showViewStatus()
   }
-  render()
+  refreshView()
 })
 $('lanes').addEventListener('click', (event) => {
   const button = event.target.closest('[data-pin]')
@@ -1180,6 +1269,8 @@ window.addEventListener(
     disposed = true
     window.clearInterval(timer)
     clearTimeout(gestureTimer)
+    clearTimeout(viewTimer)
+    cancelAnimationFrame(panFrame)
     resize.disconnect()
     cancelAnimationFrame(resizeFrame)
     laneMotion.dispose()
@@ -1188,4 +1279,5 @@ window.addEventListener(
   },
   { once: true }
 )
+showViewStatus()
 void refresh()

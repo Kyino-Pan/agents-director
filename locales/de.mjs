@@ -1,6 +1,6 @@
 export default {
-  'This pin list is full. Remove a star from this list and try again.':
-    'Diese Liste ist voll. Entfernen Sie einen Stern aus der Liste und versuchen Sie es erneut.',
+  'This pin list is full. Unpin an item and try again.':
+    'Diese Liste ist voll. Lösen Sie die Anheftung eines Eintrags und versuchen Sie es erneut.',
   'Could not save this preference. Try again.':
     'Diese Einstellung konnte nicht gespeichert werden. Bitte erneut versuchen.',
   'Saved preferences are unavailable.': 'Gespeicherte Einstellungen sind nicht verfügbar.',
@@ -17,7 +17,7 @@ export default {
   'Pause view': 'Ansicht pausieren',
   'Resume live': 'Live-Ansicht fortsetzen',
   'View paused': 'Ansicht pausiert',
-  'Live · 5s': 'Live · 5 s',
+  Live: 'Live',
   'Updating…': 'Aktualisierung läuft…',
   Disconnected: 'Getrennt',
   Window: 'Zeitfenster',
@@ -175,6 +175,20 @@ export default {
     'Der ursprüngliche Arbeitsbereich ist in Orca nicht mehr verfügbar.',
   'More than one terminal owns this session; choose it in Orca.':
     'Mehrere Terminals verwenden diese Sitzung. Bitte in Orca auswählen.',
+  'Orca has not provided a terminal for this live session.':
+    'Orca hat für diese laufende Sitzung kein Terminal bereitgestellt.',
+  'Orca could not verify the complete agent inventory. Choose this session in Orca.':
+    'Orca konnte die vollständige Agentenliste nicht überprüfen. Bitte diese Sitzung in Orca auswählen.',
+  'Orca cannot identify the original workspace for this history-only session. Choose it in Orca.':
+    'Orca kann den ursprünglichen Arbeitsbereich dieser Verlaufssitzung nicht bestimmen. Bitte in Orca auswählen.',
+  'The original workspace now belongs to a different host. Open it in Orca.':
+    'Der ursprüngliche Arbeitsbereich gehört jetzt zu einem anderen Host. Bitte in Orca öffnen.',
+  'This session is running in another workspace; choose it in Orca.':
+    'Diese Sitzung läuft in einem anderen Arbeitsbereich. Bitte in Orca auswählen.',
+  'Orca did not list this terminal in its original workspace. Open it in Orca.':
+    'Orca hat dieses Terminal nicht im ursprünglichen Arbeitsbereich aufgelistet. Bitte in Orca öffnen.',
+  'The terminal has conflicting public session identities; choose it in Orca.':
+    'Die öffentlichen Sitzungsidentitäten dieses Terminals widersprechen sich. Bitte das Terminal in Orca auswählen.',
   'This session is not available in the public history for its original workspace.':
     'Diese Sitzung fehlt im öffentlichen Verlauf des ursprünglichen Arbeitsbereichs.',
   'Orca did not return a terminal for this session.':

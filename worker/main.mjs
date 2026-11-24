@@ -141,6 +141,7 @@ export default function activate(orca) {
     const prefs = await shared.read()
     const { pinnedProjects, ...snapshot } = store.snapshot(Date.now(), {
       hideShortTasks: input?.hideShortTasks !== false,
+      view: input?.view,
       pinnedTerminals: prefs.pinnedTerminals,
       pinnedProjects: prefs.pinnedProjects,
       attempts: collector.relations.attempts()

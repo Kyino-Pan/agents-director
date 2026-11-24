@@ -1,5 +1,5 @@
 export default {
-  'This pin list is full. Remove a star from this list and try again.':
+  'This pin list is full. Unpin an item and try again.':
     '此置顶列表已满，请先取消该列表中一项的置顶，再重试。',
   'Could not save this preference. Try again.': '无法保存此偏好设置，请重试。',
   'Saved preferences are unavailable.': '暂时无法读取已保存的偏好设置。',
@@ -16,7 +16,7 @@ export default {
   'Pause view': '暂停视图',
   'Resume live': '恢复实时显示',
   'View paused': '视图已暂停',
-  'Live · 5s': '实时 · 5 秒',
+  Live: '实时',
   'Updating…': '更新中…',
   Disconnected: '连接已断开',
   Window: '时间窗口',
@@ -160,6 +160,19 @@ export default {
   'The original workspace is no longer available in Orca.': '原始工作区在 Orca 中已不可用。',
   'More than one terminal owns this session; choose it in Orca.':
     '多个终端拥有此会话，请在 Orca 中选择终端。',
+  'Orca has not provided a terminal for this live session.': 'Orca 尚未提供此运行中会话的终端。',
+  'Orca could not verify the complete agent inventory. Choose this session in Orca.':
+    'Orca 无法核实完整代理列表，请在 Orca 中选择此会话。',
+  'Orca cannot identify the original workspace for this history-only session. Choose it in Orca.':
+    'Orca 无法确定此历史会话的原始工作区，请在 Orca 中选择。',
+  'The original workspace now belongs to a different host. Open it in Orca.':
+    '原始工作区现已属于另一台主机，请在 Orca 中打开。',
+  'This session is running in another workspace; choose it in Orca.':
+    '此会话正在另一工作区运行，请在 Orca 中选择。',
+  'Orca did not list this terminal in its original workspace. Open it in Orca.':
+    'Orca 未在原始工作区列出此终端，请在 Orca 中打开。',
+  'The terminal has conflicting public session identities; choose it in Orca.':
+    '此终端的公开会话身份存在冲突，请在 Orca 中选择终端。',
   'This session is not available in the public history for its original workspace.':
     '原始工作区的公开历史中没有此会话。',
   'Orca did not return a terminal for this session.': 'Orca 未返回此会话的终端。',

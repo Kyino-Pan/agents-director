@@ -16,7 +16,7 @@ between every workspace.
   context menu to focus a matching terminal or resume its saved session in the
   original workspace. Orca controls how and whether a session can resume.
 - **Flexible layout:** open an editor tab or sidebar panel. Time window and lane
-  order preferences persist between sessions. Star a project or terminal to pin it.
+  order preferences persist between sessions. Use the pin beside a project or terminal to keep it at the top of its group.
   The language selector beside the live indicator supports 中文, 日本語, 한국어,
   English, Français and Deutsch.
 

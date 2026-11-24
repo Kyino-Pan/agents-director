@@ -38,7 +38,8 @@ before(async () => {
       '/lane-motion.mjs': ['lane-motion.mjs', 'text/javascript'],
       '/timeline-evidence.mjs': ['timeline-evidence.mjs', 'text/javascript'],
       '/shared-preferences.mjs': ['shared-preferences.mjs', 'text/javascript'],
-      '/view-preferences.mjs': ['view-preferences.mjs', 'text/javascript']
+      '/view-preferences.mjs': ['view-preferences.mjs', 'text/javascript'],
+      '/view-window.mjs': ['view-window.mjs', 'text/javascript']
     }
     const entry = files[request.url]
     if (!entry) {

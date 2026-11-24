@@ -75,6 +75,7 @@ test('pinned projects and terminals stay scoped, searchable and keyboard accessi
     )
     await page.locator('#zoom').focus()
     await page.keyboard.press('Home')
+    await page.locator('.lane[data-agent="quiet-a"]').waitFor({ state: 'detached' })
     assert.deepEqual(await lanes(page), ['quiet-b', 'active-b', 'active-a'])
     assert.equal(await page.locator('.project-row').count(), 3)
     assert.equal(await quiet.locator('.lane-state').innerText(), 'No activity in this window')
@@ -193,7 +194,7 @@ test('a project keeps its own unpin button with zero qualifying lanes and after 
   }
 })
 
-test('unselected project and terminal stars reveal only their row on hover or keyboard focus', async () => {
+test('unselected project and terminal pins reveal only their row on hover or keyboard focus', async () => {
   const { page } = await pageFor({ getSnapshot: (input) => fixture().snapshot(now, input) })
   try {
     for (const rowClass of ['project-row', 'lane-row']) {
@@ -252,7 +253,7 @@ test('two open views persist consecutive toggles and language, and keep collecti
   const opts = { preferences, getSnapshot: (input) => data.snapshot(now, input) }
   const { page: side } = await pageFor({ ...opts, width: 350 })
   const { page: editor } = await pageFor(opts)
-  const star = (page, id) =>
+  const pin = (page, id) =>
     page
       .locator('.lane-row')
       .filter({ has: page.locator('.lane[data-agent="' + id + '"]') })
@@ -267,9 +268,9 @@ test('two open views persist consecutive toggles and language, and keep collecti
     await side.locator('#pause').click()
     await side.locator('#search').fill('active')
     const range = await side.locator('#range-end').inputValue()
-    await Promise.all([star(side, 'active-a').click(), star(editor, 'active-b').click()])
+    await Promise.all([pin(side, 'active-a').click(), pin(editor, 'active-b').click()])
     await Promise.all([waitStar(side, 'active-b', true), waitStar(editor, 'active-a', true)])
-    await star(editor, 'active-a').click()
+    await pin(editor, 'active-a').click()
     await waitStar(side, 'active-a', false)
     await editor.locator('#language').selectOption('de')
     await side.waitForFunction(() => document.documentElement.lang === 'de')
@@ -282,9 +283,9 @@ test('two open views persist consecutive toggles and language, and keep collecti
     assert.equal(await side.locator('#search').inputValue(), 'active')
     assert.equal(await side.locator('#range-end').inputValue(), range)
     preferences.reject = true
-    await star(editor, 'active-a').click()
+    await pin(editor, 'active-a').click()
     await editor.locator('#preference-error').waitFor()
-    assert.equal(await star(editor, 'active-a').getAttribute('aria-pressed'), 'false')
+    assert.equal(await pin(editor, 'active-a').getAttribute('aria-pressed'), 'false')
     assert.equal(await editor.locator('#failure').isVisible(), false)
     data.agent('active-a', { label: 'Updated sample', labelSource: 'user' })
     await editor.evaluate(() => window.notifyActivity())
@@ -293,14 +294,15 @@ test('two open views persist consecutive toggles and language, and keep collecti
       await editor.evaluate(() =>
         window.snapshotRequests.every(
           (args) =>
-            Object.keys(args).sort().join() === 'hideShortTasks,withOmittedActivity' &&
-            args.withOmittedActivity === true
+            Object.keys(args).sort().join() === 'hideShortTasks,view,withOmittedActivity' &&
+            args.withOmittedActivity === true &&
+            args.view.hours > 0
         )
       ),
       true
     )
     preferences.reject = false
-    await star(editor, 'active-a').click()
+    await pin(editor, 'active-a').click()
     await waitStar(side, 'active-a', true)
     await editor.locator('#preference-error').waitFor({ state: 'hidden' })
   } finally {
