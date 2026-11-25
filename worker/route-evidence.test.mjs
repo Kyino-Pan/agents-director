@@ -275,7 +275,7 @@ test('reply failures, original-id echoes, replays and indirect commands cannot p
     [reply.replace('msg_question', 'invalid'), 'messageId=msg_answer'],
     ['sh -c "' + reply + '"', 'messageId=msg_answer'],
     [reply.replace('orca ', '"$OTHER" '), 'messageId=msg_answer'],
-    [reply.replace('orca ', '"$ORCA_CLI_COMMAND" '), 'messageId=msg_answer'],
+    [reply.replace('orca ', '"${ORCA_CLI_COMMAND:-other}" '), 'messageId=msg_answer'],
     [reply.replace('orca ', '"$(command -v orca)" '), 'messageId=msg_answer']
   ]) {
     const f = probe()
