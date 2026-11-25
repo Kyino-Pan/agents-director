@@ -254,8 +254,13 @@ Agents Director custom editor at five-minute zoom and `orca plugin shot`.
   check for the returned ID supplies the recipient and retrieval time. Until then
   these receipts stay in memory. A run-scoped check requires an explicit terminal
   matching the hook's own terminal.
-- Parsing accepts a direct `orca` or `"$ORCA_CLI_BIN_DIR/orca"` command, plain send/reply receipts or JSON,
-  and concise worker-start receipts. Explicit `--environment local` and
+- Parsing accepts a direct `orca`, `"$ORCA_CLI_BIN_DIR/orca"`,
+  `"$ORCA_CLI_COMMAND"` or `"${ORCA_CLI_COMMAND:-orca}"` command, plain send/reply
+  receipts or JSON, and concise worker-start receipts. The variable spellings are
+  recognized literally; the collector never reads or expands their values. A
+  single final ` 2>&1` is allowed to combine the same command's output. Other
+  redirects, command substitutions, wrappers and additional commands are rejected.
+  Explicit `--environment local` and
   `--environment=local` follow the CLI's global-flag positions before, within or
   after the command path. Other environments, repeated selectors and competing
   remote flags are rejected; no saved alias is resolved. Message IDs may contain
@@ -278,7 +283,7 @@ Agents Director custom editor at five-minute zoom and `orca plugin shot`.
   `--json` for complete batches across CLI versions and action/footer formats.
   Read-only audit rows and explicitly replayed JSON results do not prove receipt.
   Receipt header/body claims never provide the sender identity.
-- Compound shells, redirects, substitutions, failed calls,
+- Compound shells, other redirects, substitutions, failed calls,
   cross-server sends, replay commands, ambiguous ownership and group sends are
   excluded. Both tool phases must have
   matching call and terminal IDs. An unresolved receipt stays in memory for up
@@ -294,6 +299,31 @@ Agents Director custom editor at five-minute zoom and `orca plugin shot`.
   give the plugin the same hook pair. For those surfaces, broader coverage needs
   a public event that carries a message ID, both stable session identities and
   the acceptance or delivery stage.
+
+### Terminal provider contracts
+
+The collector accepts `Bash`, `Shell` and `exec_command` tool hooks, plus Devin's
+`exec`. Devin's documented `PostToolUse` response is an object with `success`,
+string `output` and `error`; Orca passes it through to `agent.tool.after`. An exec
+receipt requires `success: true`, no nonempty error, and a successful recognized
+CLI receipt inside `output`. A failed tool's receipt-looking text is rejected.
+Missing call IDs, unresolved terminal ownership and mismatched providers remain
+unobserved. A session or turn ID never substitutes for a tool call ID.
+
+Devin's [hook reference](https://docs.devin.ai/cli/extensibility/hooks/lifecycle-hooks#posttooluse)
+and the installed Orca 1.4.274 field projection were checked with controlled raw
+payload replay. Official `orca/testing` worker hooks and requests exercised
+Devin → Claude, Claude → Devin and Codex → Devin. Node fixtures exercise all nine
+source/target provider pairs; browser fixtures follow the two Claude/Devin
+directions through to solid spawn and dashed retrieved-message paths. These are
+contract and mock-host checks, not a live Devin or Claude terminal run or a
+paid-model test. The earlier real Codex measurements below retain their own scope.
+
+Native Chat and provider-internal subagents still lack the public terminal
+identities and hook pairs this collector requires. Creating a workspace without
+an agent does not prove a spawn. Attaching or resuming an existing session does
+not create a new parent link. History in another workspace does not supply a
+creation bound until public ownership can establish an unambiguous match.
 
 ### Local terminal reproduction
 

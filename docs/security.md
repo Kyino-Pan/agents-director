@@ -38,6 +38,11 @@ Only recognized direct Orca routing actions are parsed, in memory. No command,
 body, subject, prompt, environment, raw output or tool call ID is saved by these
 handlers. Successful messages retain a message ID, session endpoints when known,
 stage and times. A verified child retains its parent ID and observed launch time.
+Only fixed launcher spellings are recognized; even `"${ORCA_CLI_COMMAND:-orca}"`
+is matched as text, without reading the environment or evaluating shell syntax.
+One final `2>&1` may combine that command's output; other redirections and compound
+commands remain excluded. Devin exec responses must report tool success before
+their output can supply a successful CLI receipt.
 
 Titles, public identities, summary counts, workspace/project metadata and
 bounded observed states are also cached. A public title can include the start of a first

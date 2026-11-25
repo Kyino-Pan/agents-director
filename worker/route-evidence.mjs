@@ -25,13 +25,21 @@ const kept = new Set([
   '--run',
   '--environment'
 ])
-// Match only the executable word. Never expand variables or accept shell wrappers.
-const executable = /^(?:orca|"\$ORCA_CLI_BIN_DIR\/orca")(?=[ \t])/
+// Recognize only these literal launcher spellings; never read or expand the environment.
+const executable =
+  /^(?:orca|"\$ORCA_CLI_BIN_DIR\/orca"|"\$(?:ORCA_CLI_COMMAND|\{ORCA_CLI_COMMAND:-orca\})")(?=[ \t])/
 
 export function actionOf(event) {
-  if (!['Bash', 'Shell', 'exec_command'].includes(event.tool)) return
-  const command = event.input?.command ?? event.input?.cmd
-  if (typeof command !== 'string' || command.length > 65536) return
+  if (
+    !['Bash', 'Shell', 'exec_command'].includes(event.tool) &&
+    !(event.agent === 'devin' && event.tool === 'exec')
+  )
+    return
+  const input = event.input?.command ?? event.input?.cmd
+  if (typeof input !== 'string' || input.length > 65536) return
+  // One final stderr-to-stdout duplication changes no command or argument. Other
+  // redirects and shell operators still fail the word grammar below.
+  const command = input.replace(/[ \t]+2>&1[ \t]*$/, '')
   const prefix = executable.exec(command)
   if (!prefix) return
   const words = []
@@ -231,7 +239,14 @@ function plainWorkerReceipt(output) {
 }
 
 export function receiptOf(action, event) {
-  const output = event.output?.stdout ?? event.output
+  let output = event.output?.stdout ?? event.output
+  if (event.agent === 'devin' && event.tool === 'exec') {
+    // Devin's documented PostToolUse tool_response is passed through by Orca.
+    // A tool failure must not turn receipt-looking output into routing evidence.
+    const result = event.output
+    if (result?.success !== true || (result.error != null && result.error !== '')) return
+    output = result.output
+  }
   if (typeof output !== 'string' || output.length > 262144 || event.output?.is_error) return
   if (!action.json) {
     if (action.verb === 'worker-start') return plainWorkerReceipt(output)
