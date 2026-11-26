@@ -197,15 +197,20 @@ duration of execution history. Continuous observations of the same terminal stat
 already extend one point's end time; display-only gaps are generated for snapshots
 and are not stored as points.
 
-The worker also applies a conservative reply-size policy below the public bridge's
-1 MiB limit. Ordinary replies still use up to 4,000 intervals. Long identity or
-message fields can leave fewer interval places: the worker rebuilds the same
-snapshot with the existing reservations and fair-share order, reporting the exact
-omissions through the same notices. Lane membership, pins, message identities,
+The worker also applies conservative size and structure policies to replies.
+Ordinary replies still use up to 4,000 intervals. Long fields or many instantaneous
+observations can leave fewer interval places: the worker rebuilds the same snapshot
+with the existing endpoint/latest reservations and fair shares. When reducing fill,
+it selects bounded Working, Blocked and Waiting intervals before optional Done
+intervals or gaps, newest first within each tier. Exact omissions use the same
+notices. Lane membership, pins, message identities,
 message details, spawn metadata and instantaneous observations are preserved.
 Older callers retain their inline omission ranges. The policy uses UTF-8 string
-weights and structural allowances with a target 4 KiB below 1 MiB; it does not reproduce
-the host's internal size accounting. If protected evidence alone exceeds that
+weights and structural allowances with a target 4 KiB below the public 1 MiB
+limit, plus an independent 8,192 object/array guard. The latter counts reply
+containers, separately from the 8,196 recorded state points. Main and paired omission
+replies are both checked before choosing fill. These are application policies, not
+the host's acceptance algorithm or a JSON export-size test. If protected evidence alone exceeds that
 estimate, the worker submits it intact for the public bridge to accept or reject;
 it does not delete messages or endpoints to force a fit. A bridge rejection leaves
 the previous complete plot visible; a narrower window can reduce the reply.

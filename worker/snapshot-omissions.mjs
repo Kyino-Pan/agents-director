@@ -1,6 +1,8 @@
 // Detailed omission evidence can push an otherwise valid timeline over Orca's
 // 1 MiB reply limit. Pair the visible rows with one bounded follow-up reply
 // from the same snapshot; frame IDs are supplied by the public panel handler.
+import { replyFits } from './snapshot-reply.mjs'
+
 export function createOmissionReplies() {
   const pending = new Map()
   return {
@@ -27,6 +29,11 @@ export function createOmissionReplies() {
       const token = crypto.randomUUID()
       pending.set(frame, { token, rows, expires: now + 30000 })
       return { ...snapshot, agents, omissionToken: token }
+    },
+    fits(frame, token) {
+      if (!token) return true
+      const reply = pending.get(frame)
+      return reply?.token === token && replyFits({ rows: reply.rows })
     },
     take(frame, token) {
       const reply = pending.get(frame)

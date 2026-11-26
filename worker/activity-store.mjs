@@ -190,7 +190,7 @@ function selectLanes(agents, messages, pins, now, range) {
 
 // A displayed message can reserve at most three intervals: both lanes at the
 // plotted time and the receiver at retrieval. Even 600 messages fit in 4,000.
-function limitTimeline(agents, messages, budget) {
+function limitTimeline(agents, messages, budget, preferActivity) {
   if (agents.reduce((sum, a) => sum + a.segments.length, 0) <= budget) return false
   const lanes = new Map(
     agents.map((agent) => [agent.id, { agent, keep: new Set(), next: agent.segments.length - 1 }])
@@ -212,15 +212,27 @@ function limitTimeline(agents, messages, budget) {
     if (agent.segments.length) keep.add(agent.segments.at(-1))
     budget -= keep.size
   }
-  let active = [...lanes.values()].reverse()
-  for (let share = 1; budget > 0; share++) {
-    active = active.filter(({ agent, keep }) => keep.size < agent.segments.length)
-    for (const lane of active) {
-      const { agent, keep } = lane
-      if (keep.size >= share) continue
-      while (keep.has(agent.segments[lane.next])) lane.next--
-      keep.add(agent.segments[lane.next--])
-      if (--budget === 0) break
+  for (const activityOnly of preferActivity ? [true, false] : [false]) {
+    let active = [...lanes.values()].reverse()
+    for (const lane of active) lane.next = lane.agent.segments.length - 1
+    for (let share = 1; budget > 0; share++) {
+      active = active.filter((lane) => {
+        const { agent, keep } = lane
+        while (
+          lane.next >= 0 &&
+          (keep.has(agent.segments[lane.next]) ||
+            (activityOnly && !isActiveState(agent.segments[lane.next].state)))
+        )
+          lane.next--
+        return lane.next >= 0
+      })
+      if (!active.length) break
+      for (const lane of active) {
+        const { agent, keep } = lane
+        if (keep.size >= share) continue
+        keep.add(agent.segments[lane.next--])
+        if (--budget === 0) break
+      }
     }
   }
   for (const { agent, keep } of lanes.values()) {
@@ -628,7 +640,8 @@ export class ActivityStore {
       pinnedTerminals = [],
       pinnedProjects = [],
       view,
-      segmentBudget = 4000
+      segmentBudget = 4000,
+      preferActivity = false
     } = {}
   ) {
     this.prune(now)
@@ -795,7 +808,12 @@ export class ActivityStore {
     const shown = messages.slice(-600)
     if (range) windowTimeline(visible, shown, range)
     // Internal reply sizing may lower the fill budget, never the reservations.
-    const trimmed = limitTimeline(visible, shown, Math.max(0, Math.min(4000, segmentBudget)))
+    const trimmed = limitTimeline(
+      visible,
+      shown,
+      Math.max(0, Math.min(4000, segmentBudget)),
+      preferActivity
+    )
     return {
       now,
       windowStart,
