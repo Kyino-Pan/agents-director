@@ -183,7 +183,11 @@ those bounds qualify through omitted activity. The frame retrieves the affected
 rows’ omission metadata in a separate reply bound to that snapshot. Done intervals and gaps can still
 carry a clipping notice when another event or a pin keeps the lane visible. “History limited” appears when such
 a window contains no retained state interval. The recorder bounds
-points and messages at 5,000 each.
+state points at 8,196 and messages at 5,000. The seven-day time bound and storage
+byte limits still apply, so these are record limits rather than a guaranteed
+duration of execution history. Continuous observations of the same terminal state
+already extend one point's end time; display-only gaps are generated for snapshots
+and are not stored as points.
 
 After pins and verified mail reserve lanes, in-window verified spawns reserve
 both eligible endpoints together within the remaining 160 places. An endpoint

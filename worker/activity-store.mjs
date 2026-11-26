@@ -4,7 +4,8 @@ import { viewWindow } from '../view-window.mjs'
 
 export const WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 const STATES = new Set(['working', 'blocked', 'waiting', 'done', 'unknown'])
-const MAX_RECORDS = 5000
+const MAX_POINTS = 8196
+const MAX_MESSAGES = 5000
 const NAME_PRIORITY = {
   fallback: 0,
   path: 1,
@@ -560,13 +561,13 @@ export class ActivityStore {
         this.messages.delete(id)
       }
     }
-    const trim = (records) => {
-      if (records.size <= MAX_RECORDS) {
+    const trim = (records, limit) => {
+      if (records.size <= limit) {
         return
       }
       this.limited = true
       const ordered = [...records.values()].sort((a, b) => a.at - b.at)
-      for (const item of ordered.slice(0, records.size - MAX_RECORDS)) {
+      for (const item of ordered.slice(0, records.size - limit)) {
         if (records === this.points) {
           forgetPoint(item.id, item)
         } else {
@@ -574,8 +575,8 @@ export class ActivityStore {
         }
       }
     }
-    trim(this.points)
-    trim(this.messages)
+    trim(this.points, MAX_POINTS)
+    trim(this.messages, MAX_MESSAGES)
     const needed = new Set([...this.points.values()].map((point) => point.agentId))
     for (const message of this.messages.values()) {
       needed.add(message.from)
