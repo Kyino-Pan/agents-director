@@ -1,11 +1,6 @@
 import { projectKey, terminalKey } from './pin-identity.mjs'
 import { t, locale } from './panel-i18n.mjs'
-import {
-  segmentAt,
-  eventInWindow,
-  isActiveState,
-  overlapsOmittedActivity
-} from './timeline-evidence.mjs'
+import { segmentAt, hasWindowActivity } from './timeline-evidence.mjs'
 import { orderProjectLanes } from './lane-order.mjs'
 import { harnessLabel } from './panel-harness.mjs'
 
@@ -253,16 +248,7 @@ export function windowActivity(snapshot, start, end) {
       ids.add(agent.id)
       if (agent.parentId) ids.add(agent.parentId)
     }
-    if (
-      overlapsOmittedActivity(agent, start, end) ||
-      agent.stateEvents?.some(
-        (event) => isActiveState(event.state) && eventInWindow(event, start, end)
-      ) ||
-      agent.segments.some(
-        (segment) => isActiveState(segment.state) && segment.end > start && segment.start < end
-      )
-    )
-      ids.add(agent.id)
+    if (hasWindowActivity(agent, start, end)) ids.add(agent.id)
   }
   return ids
 }

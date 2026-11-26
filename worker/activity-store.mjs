@@ -1,5 +1,5 @@
 import { projectKey, terminalKey } from '../pin-identity.mjs'
-import { segmentAt, isActiveState } from '../timeline-evidence.mjs'
+import { segmentAt, isActiveState, hasWindowActivity } from '../timeline-evidence.mjs'
 import { viewWindow } from '../view-window.mjs'
 
 export const WINDOW_MS = 7 * 24 * 60 * 60 * 1000
@@ -170,6 +170,14 @@ function selectLanes(agents, messages, pins, now, range) {
     const missing = [child.parentId, child.id].filter((id) => !selected.has(id))
     if (selected.size + missing.length <= budget) {
       for (const id of missing) selected.add(id)
+    }
+  }
+  if (range) {
+    // Use the panel's evidence rule before inactive summaries spend lane places.
+    // Explicit pins and verified edge endpoints keep their existing reservations.
+    for (const agent of agents) {
+      if (selected.size === budget) break
+      if (hasWindowActivity(agent, range.start, range.end)) selected.add(agent.id)
     }
   }
   for (const agent of agents) {

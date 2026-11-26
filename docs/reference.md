@@ -148,8 +148,16 @@ reserve their session endpoints, newest plotted time first, with message ID as
 the tie-break. Both endpoints of a directed message must fit together; an unfit
 pair is skipped without turning it into a receiver-only message. A real
 receiver-only observation needs one place. In-progress send attempts do not
-reserve lanes. Remaining places use label order, with session identity breaking
-equal-label ties. Selected rows retain the usual pinned/label display order.
+reserve lanes. After pins, verified mail and in-window spawn pairs, windowed requests
+fill remaining places with lanes that have active observations in that window,
+before inactive session summaries. The worker uses the panel's existing observation
+evidence, including bounded intervals and instantaneous active observations; work
+outside the requested window does not qualify. Unreserved attempts keep the
+existing fallback selection. Each tier uses label order, with
+session identity breaking equal-label ties. If active lanes alone exceed the
+remaining budget, that same order decides which fit. Unused places can still carry
+other session summaries for inspection. Requests without a window retain the
+original seven-day selection. Selected rows retain the usual pinned/label display order.
 If pins alone exceed 160, that same stable order decides which fit. A pin can
 still retain a filtered short task; mail alone cannot override that policy.
 

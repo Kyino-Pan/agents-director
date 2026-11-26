@@ -39,3 +39,15 @@ export function overlapsOmittedActivity(agent, start, end) {
   }
   return false
 }
+
+export function hasWindowActivity(agent, start, end) {
+  return (
+    overlapsOmittedActivity(agent, start, end) ||
+    agent.stateEvents?.some(
+      (event) => isActiveState(event.state) && eventInWindow(event, start, end)
+    ) ||
+    agent.segments.some(
+      (segment) => isActiveState(segment.state) && segment.end > start && segment.start < end
+    )
+  )
+}
