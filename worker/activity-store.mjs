@@ -190,8 +190,7 @@ function selectLanes(agents, messages, pins, now, range) {
 
 // A displayed message can reserve at most three intervals: both lanes at the
 // plotted time and the receiver at retrieval. Even 600 messages fit in 4,000.
-function limitTimeline(agents, messages) {
-  let budget = 4000
+function limitTimeline(agents, messages, budget) {
   if (agents.reduce((sum, a) => sum + a.segments.length, 0) <= budget) return false
   const lanes = new Map(
     agents.map((agent) => [agent.id, { agent, keep: new Set(), next: agent.segments.length - 1 }])
@@ -623,7 +622,14 @@ export class ActivityStore {
   // Raw consumers retain the unfiltered view; panel/preview endpoints supply the preference.
   snapshot(
     now = Date.now(),
-    { hideShortTasks = false, attempts = [], pinnedTerminals = [], pinnedProjects = [], view } = {}
+    {
+      hideShortTasks = false,
+      attempts = [],
+      pinnedTerminals = [],
+      pinnedProjects = [],
+      view,
+      segmentBudget = 4000
+    } = {}
   ) {
     this.prune(now)
     const windowStart = now - WINDOW_MS
@@ -788,7 +794,8 @@ export class ActivityStore {
       .sort((a, b) => a.at - b.at)
     const shown = messages.slice(-600)
     if (range) windowTimeline(visible, shown, range)
-    const trimmed = limitTimeline(visible, shown)
+    // Internal reply sizing may lower the fill budget, never the reservations.
+    const trimmed = limitTimeline(visible, shown, Math.max(0, Math.min(4000, segmentBudget)))
     return {
       now,
       windowStart,

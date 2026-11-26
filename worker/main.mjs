@@ -1,5 +1,6 @@
 import { createOmissionReplies } from './snapshot-omissions.mjs'
 import { createHeadingPages } from './project-headings.mjs'
+import { prepareSnapshotReply } from './snapshot-reply.mjs'
 import { createSharedPreferences } from '../shared-preferences.mjs'
 import { ActivityStore } from './activity-store.mjs'
 import { PublicCollector } from './public-collector.mjs'
@@ -139,20 +140,20 @@ export default function activate(orca) {
   orca.panels.handle('activity.snapshot', async (input, context) => {
     await ready
     const prefs = await shared.read()
-    const { pinnedProjects, ...snapshot } = store.snapshot(Date.now(), {
+    const options = {
       hideShortTasks: input?.hideShortTasks !== false,
       view: input?.view,
       pinnedTerminals: prefs.pinnedTerminals,
       pinnedProjects: prefs.pinnedProjects,
       attempts: collector.relations.attempts()
-    })
-    return {
+    }
+    return prepareSnapshotReply(store, Date.now(), options, ({ pinnedProjects, ...snapshot }) => ({
       ...omissions.prepare(snapshot, input?.withOmittedActivity && context?.panel.id),
       headingVersion: headings.update(pinnedProjects),
       language: prefs.language,
       pinVersion: prefs.pinVersion,
       preferencesUnavailable: prefs.preferencesUnavailable ?? false
-    }
+    }))
   })
   orca.panels.handle('activity.omittedActivity', (input, context) =>
     omissions.take(context.panel.id, input?.token)

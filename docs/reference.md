@@ -181,7 +181,7 @@ the previous complete plot until the new one arrives. Pausing anchors the time
 window while window changes can still request its recorded history. Callers that
 omit the window keep the original seven-day snapshot contract.
 
-When the requested evidence exceeds 4,000 segments, the snapshot first reserves the
+When the requested evidence exceeds the interval reply budget, the snapshot first reserves the
 existing intervals covering both endpoints at the plotted message time, the
 receiver at retrieval, and each lane's latest interval. Sparse lanes keep
 their full history when it fits. Dense lanes share the budget and fill their
@@ -196,6 +196,21 @@ byte limits still apply, so these are record limits rather than a guaranteed
 duration of execution history. Continuous observations of the same terminal state
 already extend one point's end time; display-only gaps are generated for snapshots
 and are not stored as points.
+
+The worker also applies a conservative reply-size policy below the public bridge's
+1 MiB limit. Ordinary replies still use up to 4,000 intervals. Long identity or
+message fields can leave fewer interval places: the worker rebuilds the same
+snapshot with the existing reservations and fair-share order, reporting the exact
+omissions through the same notices. Lane membership, pins, message identities,
+message details, spawn metadata and instantaneous observations are preserved.
+Older callers retain their inline omission ranges. The policy uses UTF-8 string
+weights and structural allowances with a target 4 KiB below 1 MiB; it does not reproduce
+the host's internal size accounting. If protected evidence alone exceeds that
+estimate, the worker submits it intact for the public bridge to accept or reject;
+it does not delete messages or endpoints to force a fit. A bridge rejection leaves
+the previous complete plot visible; a narrower window can reduce the reply.
+This affects replies only; it does not
+delete recorder data or recover already expired observations.
 
 After pins and verified mail reserve lanes, in-window verified spawns reserve
 both eligible endpoints together within the remaining 160 places. An endpoint
