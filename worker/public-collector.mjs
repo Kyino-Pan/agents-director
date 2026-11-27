@@ -86,6 +86,10 @@ export class PublicCollector {
     const stateStartedAt = Number.isFinite(row.stateStartedAt) ? row.stateStartedAt : null
     const previous = this.live.get(route)
     if (previous && at < previous.at) return
+    if (previous && previous.agentId !== id) {
+      this.store.breakWorkingRun(previous.agentId, at)
+      this.store.breakWorkingRun(id, at)
+    }
     const session = text(row.sessionId)
     const identity = session && this.identity(route, session, at)
     const owner =
@@ -103,16 +107,21 @@ export class PublicCollector {
             first: identity.first,
             since: identity.since
           })
-    const point = previous && this.store.points.get(previous.key)
+    const point =
+      previous &&
+      (this.store.points.get(previous.key) ??
+        this.store.workingRunAt(previous.agentId, previous.at))
     if (
       point &&
       previous.agentId === id &&
       previous.owner === owner &&
+      point.state === row.state &&
       previous.state === row.state &&
       previous.stateStartedAt === stateStartedAt &&
       at - previous.at <= MAX_GAP_MS
     ) {
       point.until = at
+      previous.key = point.id
       previous.at = at
       return
     }
@@ -135,9 +144,17 @@ export class PublicCollector {
     const workspace = this.workspaces.get(event.workspaceListId || event.workspaceId)
     if (!workspace || !event.terminalId) return
     const route = address(workspace.id, event.terminalId)
+    const previous = this.live.get(route)
+    const at = Math.min(
+      this.now(),
+      Number.isFinite(event.receivedAt) ? event.receivedAt : this.now()
+    )
+    if (previous && at < previous.at) return
     this.revisions.set(route, (this.revisions.get(route) || 0) + 1)
     const session = text(event.sessionId)
-    if (session) this.identity(route, session, this.now())
+    if (previous && (!session || this.store.agents.get(previous.agentId)?.sessionId !== session))
+      this.store.breakWorkingRun(previous.agentId, at)
+    if (session) this.identity(route, session, at)
     const candidates = [...this.store.agents.values()].filter(
       (agent) => agent.workspace === workspace.id && session && agent.sessionId === session
     )
@@ -147,10 +164,6 @@ export class PublicCollector {
       return
     }
     const agent = candidates[0]
-    const at = Math.min(
-      this.now(),
-      Number.isFinite(event.receivedAt) ? event.receivedAt : this.now()
-    )
     this.observe(
       workspace,
       {

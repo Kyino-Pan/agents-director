@@ -1,6 +1,7 @@
 import { projectKey, terminalKey } from '../pin-identity.mjs'
 import { segmentAt, isActiveState, hasWindowActivity } from '../timeline-evidence.mjs'
 import { viewWindow } from '../view-window.mjs'
+import { normalizeWorkingRuns } from './working-runs.mjs'
 
 export const WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 const STATES = new Set(['working', 'blocked', 'waiting', 'done', 'unknown'])
@@ -55,7 +56,7 @@ function mergeIntervals(intervals) {
   return merged
 }
 
-// This measures observed execution, not terminal or conversation lifetime.
+// This measures recorded Working runs, including confirmed short internal gaps.
 function isFinishedShortTask(agent, points) {
   const finish = points.at(-1)
   if (
@@ -94,7 +95,11 @@ function isFinishedShortTask(agent, points) {
   // Unknown observations and holes between bounded evidence cannot prove a short task.
   if (
     points.some(
-      (point) => point.state === 'unknown' && point.at >= start && point.at < finish.at
+      (point) =>
+        point.state === 'unknown' &&
+        point.source !== 'identity-change' &&
+        point.at >= start &&
+        point.at < finish.at
     ) ||
     !mergeIntervals(coverage).some(([from, to]) => from <= start && to >= finish.at)
   ) {
@@ -238,13 +243,11 @@ function limitTimeline(agents, messages, budget, preferActivity) {
   for (const { agent, keep } of lanes.values()) {
     const segments = agent.segments
     if (segments.length === keep.size) continue
-    // Report the exact holes, and keep a short-gap display join only when
-    // its bounding working observations and the whole bridge survived.
+    // Report exact omitted records; a retained Working record is already a run.
     agent.omittedSegments = segments.length - keep.size
     agent.omittedRanges = []
     agent.segments = []
     const activityBounds = []
-    let lastWork = -1
     let hole
     for (const segment of segments) {
       if (!keep.has(segment)) {
@@ -258,21 +261,9 @@ function limitTimeline(agents, messages, budget, preferActivity) {
             activityBounds[activityBounds.length - 1] = segment.end
           else activityBounds.push(segment.start, segment.end)
         }
-        lastWork = -1
         continue
       }
       hole = null
-      if (segment.state === 'working') {
-        if (lastWork >= 0) {
-          for (let i = lastWork + 1; i < agent.segments.length; i++)
-            agent.segments[i].joinedWork = true
-        }
-        lastWork = agent.segments.length
-      } else if (segment.joinedWork) {
-        delete segment.joinedWork
-      } else {
-        lastWork = -1
-      }
       agent.segments.push(segment)
     }
     if (activityBounds.length) agent.omittedActivity = activityBounds
@@ -280,8 +271,7 @@ function limitTimeline(agents, messages, budget, preferActivity) {
   return true
 }
 
-// Keep original boundaries and state/source fields. The context around a short
-// display bridge proves its join even when the viewport starts or ends in a gap.
+// Keep complete record boundaries when a viewport crosses a Working run.
 // Mail retrieval can be outside the plotted send window and still needs evidence.
 function windowTimeline(agents, messages, range) {
   const endpoints = new Map()
@@ -298,27 +288,11 @@ function windowTimeline(agents, messages, range) {
     const segments = agent.segments
     const keep = new Set()
     let previous
-    let first = -1
-    let last = -1
     for (let i = 0; i < segments.length; i++) {
       const segment = segments[i]
       if (segment.end <= range.start && segment.state !== 'unknown') previous = segment
       if (segment.end <= range.start || segment.start >= range.end) continue
       keep.add(segment)
-      if (first === -1) first = i
-      last = i
-    }
-    for (const [edge, direction] of [
-      [first, -1],
-      [last, 1]
-    ]) {
-      let index = edge
-      if (!segments[index]?.joinedWork) continue
-      while (segments[index]?.joinedWork) {
-        keep.add(segments[index])
-        index += direction
-      }
-      if (segments[index]?.state === 'working') keep.add(segments[index])
     }
     if (previous) keep.add(previous)
     for (const at of endpoints.get(agent.id) ?? []) {
@@ -460,6 +434,36 @@ export class ActivityStore {
     })
   }
 
+  normalizeRuns() {
+    const grouped = new Map()
+    for (const point of this.points.values()) {
+      if (!grouped.has(point.agentId)) grouped.set(point.agentId, [])
+      grouped.get(point.agentId).push(point)
+    }
+    for (const [id, points] of grouped) {
+      const agent = this.agents.get(id)
+      if (!agent) continue
+      const normalized = normalizeWorkingRuns(agent, points)
+      if (normalized === points) continue
+      for (const point of points) this.points.delete(point.id)
+      for (const point of normalized) this.points.set(point.id, point)
+    }
+  }
+
+  workingRunAt(agentId, at) {
+    return [...this.points.values()].find(
+      (point) =>
+        point.agentId === agentId &&
+        point.state === 'working' &&
+        point.at <= at &&
+        point.until >= at
+    )
+  }
+
+  breakWorkingRun(agentId, at) {
+    this.point(`identity-change:${agentId}:${at}`, agentId, at, 'unknown', 'identity-change', at)
+  }
+
   message(message) {
     if (!message.id || !Number.isFinite(message.at)) {
       return
@@ -543,6 +547,7 @@ export class ActivityStore {
   }
 
   prune(now = Date.now()) {
+    this.normalizeRuns()
     const forgetPoint = (id, point) => {
       const agent = this.agents.get(point.agentId)
       if (agent) {
@@ -704,10 +709,7 @@ export class ActivityStore {
         const stateEvents = []
         let lastObserved
         let lastObservedEnd
-        let lastWorkEnd = null
-        let firstGap = 0
         let displayWork = 0
-        const canJoin = !agent.id.startsWith('public-terminal:')
         for (let index = 0; index < points.length; index++) {
           const point = points[index]
           const next = points[index + 1]?.at ?? now
@@ -736,15 +738,8 @@ export class ActivityStore {
             lastObserved = point
             lastObservedEnd = end
           }
-          // Completion is a boundary even when a point occupies zero pixels.
-          if (point.state === 'done') lastWorkEnd = null
           if (point.state === 'working' && start <= end) {
-            if (canJoin && lastWorkEnd !== null && start - lastWorkEnd < 30_000) {
-              for (let i = firstGap; i < segments.length; i++) segments[i].joinedWork = true
-              displayWork += start - lastWorkEnd
-            }
             displayWork += end - start
-            lastWorkEnd = end
           }
           if (end > start) {
             segments.push({
@@ -755,7 +750,6 @@ export class ActivityStore {
               ...(completion && { completionSince })
             })
           }
-          if (point.state === 'working') firstGap = segments.length
           if (end < Math.min(next, now)) {
             segments.push({
               start: Math.max(windowStart, end),
@@ -830,6 +824,7 @@ export class ActivityStore {
   }
 
   serialize() {
+    this.normalizeRuns()
     return {
       agents: [...this.agents.values()],
       aliases: [...this.aliases],
@@ -889,6 +884,7 @@ export class ActivityStore {
       else if (id.startsWith('public-mail:')) this.message(mail)
     }
     this.collectingSince = Math.min(this.collectingSince, history.collectingSince)
+    this.normalizeRuns()
   }
 
   restore(saved, now = Date.now()) {
@@ -905,6 +901,7 @@ export class ActivityStore {
     for (const point of this.points.values()) {
       if (point.source === 'live' && point.until === undefined) {
         point.until = this.collectedUntil
+        if (point.state === 'working') point.unsettled = true
       }
     }
     this.prune(now)

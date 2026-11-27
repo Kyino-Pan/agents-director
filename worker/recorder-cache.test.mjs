@@ -18,7 +18,7 @@ test('large seven-day history survives compressed storage and restore without lo
       `live:tab:leaf:${i}:${'placement'.repeat(32)}`,
       agent,
       now - 20000 + i,
-      i % 2 ? 'done' : 'working',
+      i % 2 ? 'done' : 'blocked',
       'live',
       now - 19999 + i
     )

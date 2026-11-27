@@ -224,10 +224,6 @@ export function renderActivityDetail(context) {
     if (state === 'unknown') {
       $('detail-body').textContent = unobservedDescription(agent, segment)
     }
-    if (segment.joinedWork)
-      $('detail-body').textContent +=
-        ' ' +
-        t('The timeline connects the working observations on either side of this short interval.')
   }
 }
 

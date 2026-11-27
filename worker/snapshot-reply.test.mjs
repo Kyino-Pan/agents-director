@@ -29,7 +29,7 @@ function crowded(long = true) {
           id + i,
           id,
           at,
-          ['working', 'done', 'blocked', 'waiting'][i % 4],
+          ['blocked', 'done', 'blocked', 'waiting'][i % 4],
           'live',
           at + 1000
         )
@@ -156,7 +156,7 @@ test('protected evidence above the fill estimate stays intact for public bridge 
           'event-' + i,
           id,
           NOW - 10000 + i,
-          i % 2 ? 'done' : 'working',
+          i % 2 ? 'done' : 'blocked',
           'live',
           NOW - 10000 + i
         )

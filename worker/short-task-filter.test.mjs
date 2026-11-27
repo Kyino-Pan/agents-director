@@ -130,9 +130,10 @@ test('classification ignores viewport options and retained incomplete history ca
   assert.deepEqual(ids(filtered(restored)), ['trimmed'])
 })
 
-test('chains two-sided work gaps strictly below 30 seconds without changing raw observations', () => {
+test('records two-sided work gaps strictly below 30 seconds as one continuous run', () => {
   for (const gap of [29999, 30000, 30001]) {
     const store = new ActivityStore(START)
+    store.agent('session', { sessionId: 'session' })
     let at = START
     for (let i = 0; i < 3; i++) {
       store.point('w' + i, 'session', at, 'working', 'live', at + 1000)
@@ -143,7 +144,6 @@ test('chains two-sided work gaps strictly below 30 seconds without changing raw 
       }
     }
     store.point('done', 'session', at, 'done', 'live', at + 50)
-    store.point('new-run', 'session', at + 1000, 'working', 'live', at + 2000)
     store.point('other', 'other-session', at + 50, 'working', 'live', at + 90)
     const raw = store.serialize()
     const restored = new ActivityStore()
@@ -151,9 +151,9 @@ test('chains two-sided work gaps strictly below 30 seconds without changing raw 
     for (const recorder of [store, restored]) {
       const snapshot = recorder.snapshot(NOW)
       const intervals = snapshot.agents.find((a) => a.id === 'session').segments
-      const bridges = intervals.filter((s) => s.joinedWork)
-      assert.equal(bridges.length, gap < 30000 ? 4 : 0)
-      assert.ok(bridges.every((s) => s.end <= at && ['unknown', 'waiting'].includes(s.state)))
+      const work = intervals.filter((s) => s.state === 'working')
+      assert.equal(work.length, gap < 30000 ? 1 : 3)
+      if (gap < 30000) assert.equal(work[0].end - work[0].start, 3000 + 2 * gap)
       assert.ok(
         !snapshot.agents.find((a) => a.id === 'other-session').segments.some((s) => s.joinedWork)
       )
@@ -163,6 +163,7 @@ test('chains two-sided work gaps strictly below 30 seconds without changing raw 
 })
 test('default short-task filter counts connected display time before hiding a completed lane', () => {
   const store = new ActivityStore(START)
+  store.agent('lane', { sessionId: 'lane' })
   let t = START
   for (let i = 0; i < 4; i++) {
     store.point('w' + i, 'lane', t, 'working', 'live', t + 30000)

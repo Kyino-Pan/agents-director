@@ -194,7 +194,7 @@ test('activity priority keeps 8196 persistence independent from 4000 segment and
     store.agent(id, { label: id, sessionId: id })
     for (let i = 0; i < 100; i++) {
       const at = NOW - 600000 + i * 5000
-      store.point(id + '-' + i, id, at, i % 2 ? 'done' : 'working', 'live', at + 1000)
+      store.point(id + '-' + i, id, at, i % 2 ? 'done' : 'blocked', 'live', at + 1000)
     }
   }
   for (let i = 0; i < 605; i++)

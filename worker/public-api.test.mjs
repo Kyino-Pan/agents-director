@@ -136,7 +136,7 @@ test('terminal reuse keeps distinct conversations and never extends the previous
   assert.equal(f.store.agents.size, 2)
 })
 
-test('a new same-state generation in polls or events cannot bridge unobserved execution', async () => {
+test('a same-session Working generation confirms its short gap in polls or events', async () => {
   for (const mode of ['poll', 'event']) {
     const f = fixture()
     f.rows = [{ ...row, stateStartedAt: NOW - 1000 }]
@@ -157,17 +157,13 @@ test('a new same-state generation in polls or events cannot bridge unobserved ex
         mainAgent: { state: 'working', stateStartedAt: NOW + 4000 }
       })
     }
+    const snapshot = f.store.snapshot(f.now)
     const live = [...f.store.points.values()].filter((p) => p.state === 'working')
-    assert.equal(live.length, 2, mode)
-    assert.equal(live[0].until, NOW + 1000, mode)
-    assert.equal(live[1].at, NOW + 5000, mode)
-    assert.ok(
-      f.store
-        .snapshot(f.now)
-        .agents[0].segments.some(
-          (s) => s.state === 'unknown' && s.start <= NOW + 1000 && s.end >= NOW + 5000
-        ),
-      mode
+    assert.equal(live.length, 1, mode)
+    assert.equal(live[0].until, NOW + 5000, mode)
+    assert.deepEqual(
+      snapshot.agents[0].segments.filter((s) => s.state === 'working').map((s) => [s.start, s.end]),
+      [[NOW, NOW + 5000]]
     )
   }
 })
@@ -990,7 +986,7 @@ for (const fault of [
   })
 }
 
-test('public status changes inside a tool turn join the visible bar but preserve the bounded observations', async () => {
+test('public status changes inside a tool turn become one recorded Working run', async () => {
   const f = fixture()
   await f.collector.scan()
   f.now += 5000
@@ -1010,15 +1006,14 @@ test('public status changes inside a tool turn join the visible bar but preserve
     })
   }
   const segments = f.store.snapshot(f.now, { hideShortTasks: true }).agents[0].segments
-  const bridges = segments.filter((s) => s.joinedWork)
   assert.deepEqual(
-    bridges.map((s) => [s.start - NOW, s.end - NOW, s.state]),
-    [
-      [5000, 5043, 'unknown'],
-      [5043, 6000, 'unknown']
-    ]
+    segments.filter((s) => s.state === 'working').map((s) => [s.start - NOW, s.end - NOW, s.state]),
+    [[0, 10000, 'working']]
   )
-  assert.ok([...f.store.points.values()].some((p) => p.state === 'waiting' && p.at === NOW + 5043))
+  assert.equal(
+    [...f.store.points.values()].some((p) => p.state === 'waiting' && p.at === NOW + 5043),
+    false
+  )
   assert.equal(segments.at(-1).state, 'working')
 })
 

@@ -127,12 +127,14 @@ of an already completed terminal, including after a recorder restart, starts a
 fresh coverage interval without creating a new completion. A first-ever Done
 observation lacks that transition evidence. Individual observations can qualify at
 either window boundary even when their interval has zero width. This window rule is
-independent of the full-task execution measurement. Both operate on the snapshot
-and preserve the recorded points.
+independent of the full-task execution measurement. Both filters select from the
+normalized history without deleting those records.
 
-Every state interval is bounded by observations. Missing terminals, failed reads,
-worker downtime and poll gaps over 15 seconds stop continuity; they never imply
-continued work or completion. Session `createdAt`, `updatedAt` and `running` are
+Every source interval is bounded by observations. Missing terminals, failed reads,
+worker downtime and poll gaps over 15 seconds stop source coverage; they do not by
+themselves extend work or prove completion. A later reliable Working observation
+can confirm a short gap as part of one recorded run, as described below.
+Session `createdAt`, `updatedAt` and `running` are
 metadata, not execution intervals. Before public collection, history is unknown.
 The public session list omits subagent transcripts and Antigravity IDE conversations.
 The plugin cannot restore historical states it never observed. Remote coverage is
@@ -194,8 +196,9 @@ a window contains no retained state interval. The recorder bounds
 state points at 8,196 and messages at 5,000. The seven-day time bound and storage
 byte limits still apply, so these are record limits rather than a guaranteed
 duration of execution history. Continuous observations of the same terminal state
-already extend one point's end time; display-only gaps are generated for snapshots
-and are not stored as points.
+already extend one point's end time. Confirmed short Working gaps are compacted
+into that run's point; remaining coverage gaps are generated for snapshots and
+are not stored as duplicate history.
 
 The worker also applies conservative size and structure policies to replies.
 Ordinary replies still use up to 4,000 intervals. Long fields or many instantaneous
@@ -406,18 +409,34 @@ receiver-only row in an existing installation, cannot be inferred from these cou
 ### Working intervals
 
 Working bars use bamboo green in both host themes.
-The timeline joins working observations on the same lane when the gap from one
-end to the next start is strictly below 30,000 ms. Chains can include short
-waiting, blocked and unknown intervals. A completion ends a chain, including
-a zero-duration completion. Each interval keeps its observed state and source in
-the detail view. A leading or trailing gap stays unknown. Display duration is
-considered before hiding completed tasks shorter than three minutes.
+Two bounded Working observations on the same reliable session become one recorded
+Working run when the actual gap from the left coverage end to the right observation
+is strictly below 30,000 ms. Short Done (including zero-duration Done), Waiting,
+Blocked and Unobserved gaps inside that run are absorbed, not retained as separate
+history or selectable fragments. The complete run's start, end and duration are
+used by hover, click, keyboard details, execution time and the three-minute filter.
+Window edges clip only its visible shape, not its recorded boundaries.
+
+Without a right Working observation, the pending state stays unchanged. Gaps of
+30,000 ms or more, missing reliable bounds, unresolved identities and observed
+session changes are not bridged. A final Done remains the completion. A short
+collection pause or normal restart can only be filled after the same session is
+observed Working again within that threshold. Delayed observations inside an
+already confirmed run do not recreate its absorbed gaps. Mail keeps its original
+send/retrieval times and identities; an endpoint inside the run now belongs to
+Working, while completion evidence refers to the true trailing Done.
+
+Normalization compacts the existing v2 point records on read/save and collection
+checkpoints. Old caches remain readable, unrelated records are preserved, and no
+parallel raw-gap archive or new history store is created. Canonical point IDs and
+identity-change fences use the same existing point fields and v2 chunk envelope.
 
 ## Cache and upgrade
 
 Own storage keeps compressed observations under `activity-public-v1`, with an
 alternating chunk generation and an atomic head update. It saves about every
-15 seconds and on orderly shutdown; offline intervals stay unknown after restore.
+15 seconds and on orderly shutdown. Restore does not extend an offline run;
+only a subsequent matching Working observation can confirm a short offline gap.
 The encoded budget is 1.8 MiB; decompression is bounded to 32 MiB. Storage failures
 appear under Data sources. An over-budget save keeps the previous generation.
 

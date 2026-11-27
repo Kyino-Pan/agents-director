@@ -291,7 +291,8 @@ function evidenceInWindow(agent, start, end, hasMessages) {
 function segmentDuration(ms) {
   if (ms < 1000) return unit(ms, 'millisecond')
   if (ms < 60000) return unit(ms / 1000, 'second')
-  return duration(ms)
+  const remainder = ms % 60000
+  return duration(ms) + (remainder ? ' ' + unit(remainder / 1000, 'second') : '')
 }
 
 function duration(ms, compact = false) {
@@ -362,7 +363,11 @@ function draw() {
   if (!displayed) {
     return
   }
-  const activeKey = document.hasFocus() ? document.activeElement?.getAttribute('data-key') : null
+  const activeElement = document.hasFocus() ? document.activeElement : null
+  const activeKey = activeElement?.getAttribute('data-key')
+  const activeSegment = activeElement?.matches('.segment-target')
+    ? { agent: activeElement.dataset.agent, start: Number(activeElement.dataset.start) }
+    : null
   const previousLanes = gestureAgents ? new Map() : laneMotion.capture()
   const snapshot = displayed
   renderZoom(snapshot)
@@ -449,7 +454,11 @@ function draw() {
   if (selection?.agent && !rowById.has(selection.agent)) selection = null
   if (selection?.start !== undefined) {
     const segment = segmentAt(currentAgents.get(selection.agent)?.segments ?? [], selection.start)
-    if (segment?.start !== selection.start || !inWindow(segment)) selection = null
+    if (!segment || !inWindow(segment)) selection = null
+    else {
+      selection.start = segment.start
+      selection.key = `segment:${selection.agent}:${segment.start}`
+    }
   }
   if (selection?.message) {
     const visible = new Set(messages.map((item) => item.id))
@@ -630,31 +639,6 @@ function draw() {
   }
   const segments = svg('g')
   agents.forEach((agent) => {
-    // Draw one continuous bar underneath the original segment hit targets.
-    // Their labels and click details still describe the actual short transitions.
-    let run
-    for (const segment of agent.segments) {
-      if (!inWindow(segment)) continue
-      if (segment.state !== 'working' && !segment.joinedWork) {
-        run = null
-        continue
-      }
-      if (!run || run.end !== segment.start) run = { left: x(Math.max(start, segment.start)) }
-      run.end = segment.end
-      if (segment.joinedWork && !run.rect) {
-        run.rect = svg('rect', {
-          x: run.left,
-          y: center(agent.id) - 3,
-          height: 6,
-          rx: 1,
-          class: 'working run-bar',
-          'data-agent': agent.id,
-          'aria-hidden': true
-        })
-        segments.append(run.rect)
-      }
-      run.rect?.setAttribute('width', x(Math.min(end, segment.end)) - run.left)
-    }
     agent.segments.forEach((segment, index) => {
       if (!inWindow(segment)) {
         return
@@ -662,7 +646,6 @@ function draw() {
       const left = x(Math.max(start, segment.start))
       const barWidth = Math.max(0, x(Math.min(end, segment.end)) - left)
       const state = stateOf(segment)
-      const paint = segment.joinedWork ? 'working' : state
       const key = `segment:${agent.id}:${segment.start}`
       const label = t('{label}: {state}, {start} to {end}, {duration}', {
         label: agentName(agent),
@@ -678,6 +661,7 @@ function draw() {
         'aria-label': label,
         'data-key': key,
         'data-agent': agent.id,
+        'data-start': segment.start,
         'data-segment': index
       })
       group.append(
@@ -695,8 +679,8 @@ function draw() {
           y: center(agent.id) - 3,
           width: barWidth,
           height: 6,
-          rx: paint === 'unknown' ? 0 : 1,
-          class: `segment ${paint}${segment.end >= end ? ' current' : ''}`
+          rx: state === 'unknown' ? 0 : 1,
+          class: `segment ${state}${segment.end >= end ? ' current' : ''}`
         })
       )
       segments.append(group)
@@ -821,8 +805,16 @@ function draw() {
   laneMotion.apply(previousLanes, positions)
   renderDetail()
   if (activeKey && document.hasFocus()) {
+    let focusKey = activeKey
+    if (activeSegment) {
+      const segment = segmentAt(
+        currentAgents.get(activeSegment.agent)?.segments ?? [],
+        activeSegment.start
+      )
+      if (segment) focusKey = `segment:${activeSegment.agent}:${segment.start}`
+    }
     Array.from(document.querySelectorAll('[data-key]'))
-      .find((element) => element.dataset.key === activeKey)
+      .find((element) => element.dataset.key === focusKey)
       ?.focus({ preventScroll: true })
   }
 }

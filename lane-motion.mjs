@@ -52,7 +52,7 @@ export function createLaneMotion(lanes, chart) {
       const delta = (id) => (previous.get(id) ?? positions.get(id)) - positions.get(id)
       for (const element of [
         ...lanes.querySelectorAll('[data-agent]'),
-        ...chart.querySelectorAll('.segment-target, .run-bar')
+        ...chart.querySelectorAll('.segment-target')
       ]) {
         move(element.closest('.lane-row') || element, delta(element.dataset.agent))
       }

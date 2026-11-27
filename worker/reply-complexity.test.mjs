@@ -18,7 +18,8 @@ function events(count) {
   store.agent('z', { label: 'z', sessionId: 'z', provider: 'codex', workspace: 'qa' })
   for (let i = 0; i < count; i++) {
     const at = NOW - 600000 + i * 80
-    store.point('event-' + i, 'z', at, i % 2 ? 'done' : 'working', 'live', at)
+    // These records remain distinct; short Working cycles are now one run.
+    store.point('event-' + i, 'z', at, i % 2 ? 'done' : 'blocked', 'live', at)
   }
   return store
 }

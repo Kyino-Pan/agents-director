@@ -68,7 +68,7 @@ test('viewport edges keep exact state, short-gap proof, completion boundaries an
     const lane = clipped.agents.find((a) => a.id === 'sender')
     const previous = legacy.agents.find((a) => a.id === 'sender')
     assert.deepEqual(segmentAt(lane.segments, end - 50), segmentAt(previous.segments, end - 50))
-    assert.equal(Boolean(segmentAt(lane.segments, end - 50).joinedWork), gap < 30000)
+    assert.equal(segmentAt(lane.segments, end - 50).state, gap < 30000 ? 'working' : 'unknown')
     assert.equal(
       segmentAt(clipped.agents.find((a) => a.id === 'receiver').segments, end + 2500).state,
       'waiting'
@@ -76,8 +76,11 @@ test('viewport edges keep exact state, short-gap proof, completion boundaries an
     const acrossDone = store
       .snapshot(now, { view: { hours: 0.001, end: end + 3500 } })
       .agents.find((a) => a.id === 'sender')
-    assert.ok(acrossDone.stateEvents.some((e) => e.state === 'done' && e.at === end + 3000))
-    assert.equal(segmentAt(acrossDone.segments, end + 3000).joinedWork, undefined)
+    assert.equal(
+      acrossDone.stateEvents?.some((e) => e.state === 'done' && e.at === end + 3000) ?? false,
+      false
+    )
+    assert.equal(segmentAt(acrossDone.segments, end + 3000).state, 'working')
     assert.equal(segmentAt(acrossDone.segments, end + 3001).state, 'working')
   }
 })
@@ -88,7 +91,7 @@ test('over-budget viewports remain fair, bounded, and mark exact omissions witho
     store.agent(String(lane), { sessionId: 's' + lane })
     for (let i = 0; i < 600; i++) {
       const at = now - 60000 + i * 100
-      store.point(lane + '-' + i, String(lane), at, 'working', 'live', at + 20)
+      store.point(lane + '-' + i, String(lane), at, 'blocked', 'live', at + 20)
     }
   }
   const original = store.serialize()

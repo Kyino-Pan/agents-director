@@ -412,11 +412,7 @@ test('thin history tracks keep accessible states and generous targets in both ho
       provider: 'Claude',
       projectId: 'p',
       projectName: 'Orca',
-      segments: [
-        { start: ago(18), end: ago(1), state: 'working' },
-        { start: ago(1), end: ago(1) + 1000, state: 'unknown', joinedWork: true },
-        { start: ago(1) + 1000, end: data.now, state: 'working' }
-      ]
+      segments: [{ start: ago(18), end: data.now, state: 'working' }]
     }
   ]
   data.messages = [
@@ -461,7 +457,7 @@ test('thin history tracks keep accessible states and generous targets in both ho
           await page.locator('#detail-heading').textContent(),
           /Coordinator · Unobserved/
         )
-        assert.match(await page.locator('#detail-meta').textContent(), /1 min$/)
+        assert.match(await page.locator('#detail-meta').textContent(), /1 min 30 s$/)
         await page.keyboard.press('Escape')
         const bamboo = dark ? 'rgb(163, 199, 128)' : 'rgb(87, 124, 55)'
         assert.equal(
@@ -470,11 +466,7 @@ test('thin history tracks keep accessible states and generous targets in both ho
             .evaluate((el) => getComputedStyle(el).backgroundColor),
           bamboo
         )
-        for (const selector of [
-          '.segment.working:not(.current)',
-          '.segment.working.current',
-          '.run-bar'
-        ]) {
+        for (const selector of ['.segment.working:not(.current)', '.segment.working.current']) {
           assert.equal(
             await page
               .locator(selector)
@@ -789,15 +781,11 @@ test('incomplete public identities disable the menu and explain modified clicks'
   }
 })
 
-test('joined working track keeps the original waiting detail and receiver-only mail has no arrow', async () => {
+test('a recorded Working run has one detail and receiver-only mail has no arrow', async () => {
   const data = structuredClone(snapshot)
   const now = data.now
   const agent = data.agents[0]
-  agent.segments = [
-    { start: now - 90000, end: now - 60000, state: 'working' },
-    { start: now - 60000, end: now - 30001, state: 'waiting', source: 'live', joinedWork: true },
-    { start: now - 30001, end: now - 1000, state: 'working' }
-  ]
+  agent.segments = [{ start: now - 90000, end: now - 1000, state: 'working', source: 'live' }]
   data.agents = [agent]
   data.messages = [
     {
@@ -814,12 +802,12 @@ test('joined working track keeps the original waiting detail and receiver-only m
     preferences: new Map([['view:window-hours', 1 / 12]])
   })
   try {
-    const gap = page.locator('.segment-target[data-segment="1"]')
+    const gap = page.locator('.segment-target[data-segment="0"]')
     await gap.locator('.segment.working').waitFor()
-    assert.ok((await page.locator('.run-bar').evaluate((el) => el.getBBox().width)) > 100)
+    assert.equal(await page.locator('.segment-target').count(), 1)
     await gap.focus()
     await page.keyboard.press('Enter')
-    assert.match(await page.locator('#detail-heading').textContent(), /waiting/i)
+    assert.match(await page.locator('#detail-heading').textContent(), /working/i)
     assert.match(await page.locator('#detail-body').textContent(), /live/)
     await page.keyboard.press('Escape')
     assert.equal(await page.locator('.mailbox-input').count(), 1)
